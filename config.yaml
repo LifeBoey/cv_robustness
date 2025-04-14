@@ -1,0 +1,7 @@
+device: null
+eigen: true
+model: null
+norm: true
+num_epochs: 30
+test_loader: null
+thres: 20
