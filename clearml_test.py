@@ -174,16 +174,20 @@ if __name__ == "__main__":
     final_noisy_indices = ensemble_method(noisy_indices_all)
     print('final noisy indices, ', final_noisy_indices)
 
-    augmentation_list, augmentation_str, corrupt_func = get_corruption_helpers('album')
-    aug_dict_g = generic_combination_gradients(
-        model, 
-        test_loader, 
-        device, 
-        corrupt_func, 
-        augmentation_list, 
-        augmentation_str, 
-        plot_graphs=False
-    )
+    augmentation_libraries = args.augmentation_libraries.split(",")
+    aug_dict = {}
+    for lib in augmentation_libraries:
+        augmentation_list, augmentation_str, corrupt_func = get_corruption_helpers(lib)
+        aug_dict_g = generic_combination_gradients(
+            model, 
+            test_loader, 
+            device, 
+            corrupt_func, 
+            augmentation_list, 
+            augmentation_str, 
+            plot_graphs=False
+        )
+        aug_dict[lib] = aug_dict_g
     
     # Create/define output directory
     OUTPUT_DIR = ".."
@@ -200,7 +204,7 @@ if __name__ == "__main__":
     with open(final_noisy_indices_path, 'wb') as handle:
         pickle.dump(final_noisy_indices, handle, protocol=pickle.HIGHEST_PROTOCOL) 
     with open(augmentation_result_dict_path, 'wb') as handle:
-        pickle.dump(aug_dict_g, handle, protocol=pickle.HIGHEST_PROTOCOL) 
+        pickle.dump(aug_dict, handle, protocol=pickle.HIGHEST_PROTOCOL) 
     # with open(drift_dict_path, 'wb') as handle:
     #     pickle.dump(drift_dict, handle, protocol=pickle.HIGHEST_PROTOCOL) 
     # with open(driftgen_dict_path, 'wb') as handle:
@@ -210,7 +214,7 @@ if __name__ == "__main__":
 
     if CLEARML_INITIALIZED:
         task.upload_artifact("final_noisy_indices", artifact_object=final_noisy_indices_path)
-        task.upload_artifact("aug_dict_g", artifact_object=augmentation_result_dict_path)
+        task.upload_artifact("aug_dict", artifact_object=augmentation_result_dict_path)
         # task.upload_artifact("drift_dict", artifact_object=drift_dict_path)
         # task.upload_artifact("driftgen_dict", artifact_object=driftgen_dict_path)
         #task.upload_artifact("feat_ext_set", artifact_object=feat_ext_set_path)
