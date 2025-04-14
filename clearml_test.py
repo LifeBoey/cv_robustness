@@ -45,9 +45,10 @@ if __name__ == "__main__":
                         type=str,
                         help="Path of the category map to show what categories map to what",
                         default="fashion_mnist.h5") 
-    
-
-
+    parser.add_argument("augmentatinon_libraries",
+                        type=str,
+                        help="Path of the category map to show what categories map to what",
+                        default="album,nrtk") 
         
     parser.add_argument("--dataset_id", 
                         default="")
@@ -63,22 +64,7 @@ if __name__ == "__main__":
     parser.add_argument("--file_name_appendum", 
                         type=str,
                         help="output URI for artifacts, datasets",
-                        default="_fashion_embed",
-                        required=False)
-    parser.add_argument("--custom_inference", 
-                        type=str,
-                        help="output URI for artifacts, datasets",
-                        default="image_inference",
-                        required=False)
-    parser.add_argument("--model_api", 
-                        type=str,
-                        help="output URI for artifacts, datasets",
-                        default="",
-                        required=False)
-    parser.add_argument("--feature_extractor_api", 
-                        type=int,
-                        help="output URI for artifacts, datasets",
-                        default=1,
+                        default="_cvrobtest",
                         required=False)
           
     args = parser.parse_args()
@@ -205,26 +191,26 @@ if __name__ == "__main__":
     if not os.path.isdir(OUTPUT_DIR):
         os.mkdir(OUTPUT_DIR)    
             
-    expt_set_path = os.path.join(OUTPUT_DIR, 'expt_set'+args.file_name_appendum+'.pickle') 
-    model_set_path = os.path.join(OUTPUT_DIR, 'model_set'+args.file_name_appendum+'.pickle') 
-    drift_dict_path = os.path.join(OUTPUT_DIR, 'drift_dict'+args.file_name_appendum+'.pickle')
-    driftgen_dict_path = os.path.join(OUTPUT_DIR, 'driftgen_dict'+args.file_name_appendum+'.pickle')
+    final_noisy_indices_path = os.path.join(OUTPUT_DIR, 'final_noisy_indices'+args.file_name_appendum+'.pickle') 
+    augmentation_result_dict_path = os.path.join(OUTPUT_DIR, 'augmentation_result_dict'+args.file_name_appendum+'.pickle') 
+    # drift_dict_path = os.path.join(OUTPUT_DIR, 'drift_dict'+args.file_name_appendum+'.pickle')
+    # driftgen_dict_path = os.path.join(OUTPUT_DIR, 'driftgen_dict'+args.file_name_appendum+'.pickle')
     # feat_ext_set_path = os.path.join(OUTPUT_DIR, 'feat_ext_set'+args.file_name_appendum+'.pickle')
 
-    with open(expt_set_path, 'wb') as handle:
-        pickle.dump(expt_set, handle, protocol=pickle.HIGHEST_PROTOCOL) 
-    with open(model_set_path, 'wb') as handle:
-        pickle.dump(model_set, handle, protocol=pickle.HIGHEST_PROTOCOL) 
-    with open(drift_dict_path, 'wb') as handle:
-        pickle.dump(drift_dict, handle, protocol=pickle.HIGHEST_PROTOCOL) 
-    with open(driftgen_dict_path, 'wb') as handle:
-        pickle.dump(driftgen_dict, handle, protocol=pickle.HIGHEST_PROTOCOL) 
-    # with open(feat_ext_set_path, 'wb') as handle:
+    with open(final_noisy_indices_path, 'wb') as handle:
+        pickle.dump(final_noisy_indices, handle, protocol=pickle.HIGHEST_PROTOCOL) 
+    with open(augmentation_result_dict_path, 'wb') as handle:
+        pickle.dump(aug_dict_g, handle, protocol=pickle.HIGHEST_PROTOCOL) 
+    # with open(drift_dict_path, 'wb') as handle:
+    #     pickle.dump(drift_dict, handle, protocol=pickle.HIGHEST_PROTOCOL) 
+    # with open(driftgen_dict_path, 'wb') as handle:
+    #     pickle.dump(driftgen_dict, handle, protocol=pickle.HIGHEST_PROTOCOL) 
+    # # with open(feat_ext_set_path, 'wb') as handle:
     #     pickle.dump(feat_ext_set, handle, protocol=pickle.HIGHEST_PROTOCOL) 
 
     if CLEARML_INITIALIZED:
-        task.upload_artifact("expt_set", artifact_object=expt_set_path)
-        task.upload_artifact("model_set", artifact_object=model_set_path)
-        task.upload_artifact("drift_dict", artifact_object=drift_dict_path)
-        task.upload_artifact("driftgen_dict", artifact_object=driftgen_dict_path)
+        task.upload_artifact("final_noisy_indices", artifact_object=final_noisy_indices_path)
+        task.upload_artifact("aug_dict_g", artifact_object=augmentation_result_dict_path)
+        # task.upload_artifact("drift_dict", artifact_object=drift_dict_path)
+        # task.upload_artifact("driftgen_dict", artifact_object=driftgen_dict_path)
         #task.upload_artifact("feat_ext_set", artifact_object=feat_ext_set_path)
