@@ -1,0 +1,32 @@
+[tool.poetry]
+name = "cvrob"
+version = "0.1.0"
+description = ""
+authors = ["Gabriel Boey <boey_gabriel@yahoo.com.sg>"]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+albumentations = "^2.0.5"
+augly = "^1.0.0"
+aum = "^1.0.2"
+keras = "2.15.0"
+scipy = "^1.15.2"
+scikit-learn = "^1.6.1"
+scikit-image = "^0.25.2"
+opencv-python = "4.11.0.86"
+nrtk = "0.19.2"
+plotly = "^6.0.1"
+gradio = "5.25.2"
+imagecorruptions = "1.1.2"
+cleanlab = "2.7.0"
+matplotlib = "3.9.2"
+clearml = "1.18.0"
+docker = "7.1.0"
+torch = "2.6.0"
+torchvision = "0.21.0"
+
+[tool.poetry.dev-dependencies]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

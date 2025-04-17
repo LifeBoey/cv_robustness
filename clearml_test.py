@@ -1,42 +1,34 @@
 import os
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-print('current dir', os.getcwd())
-import ast 
-from collections import OrderedDict
-import pandas as pd
+# print('current dir', os.getcwd())
 import argparse
 import pickle
-from tensorflow.keras.models import load_model
 import torch
-from torchvision.datasets import ImageFolder
-from torchvision.transforms import ToTensor
 import yaml
 from cvrob import (label_noise_method,
                     ensemble_method,
-                    label_update_indice_method, 
-                    wrong_prediction_indice_method,
-                    loss_indice_method,
-                    aum_indice_method,
-                    fine_indice_method,
-                    cleanlab_indice_method,
-                    deep_knn_indice_method,
+                    get_all_label_noise_methods,
                     generic_combination_gradients,
-                    get_corruption_helpers)
-import json
+                    get_corruption_helpers,
+                    get_image_from_path,
+                    corrupt_and_plot_generic,
+                    retrain_experiment,
+                    get_partially_corrupted_imagecorr_dataloader)
 
 if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description="drift_main_initialize Argparser")
 
-    parser.add_argument("--data_path",
-                        type=str,
-                        help="Paths of the data you are using as reference",
-                        default='dataset_ships.pt') #'uber_train.csv'
+
     parser.add_argument("--test_file_path",
                         type=str,
                         help="Paths of the data you are using as reference",
-                        default='fashion_test') #'adult_test2.csv'
+                        default='dataset_ships.pt') #'adult_test2.csv'
+    parser.add_argument("--train_file_path",
+                        type=str,
+                        help="Paths of the data you are using as reference",
+                        default='dataset_ships.pt') #'adult_test2.csv'
     parser.add_argument("--model_file_path",
                         type=str,
                         help="Path of the category map to show what categories map to what",
@@ -44,12 +36,16 @@ if __name__ == "__main__":
     parser.add_argument("params_file_path",
                         type=str,
                         help="Path of the category map to show what categories map to what",
-                        default="fashion_mnist.h5") 
+                        default="config.yaml") 
     parser.add_argument("augmentatinon_libraries",
                         type=str,
                         help="Path of the category map to show what categories map to what",
                         default="album,nrtk") 
-        
+    parser.add_argument("image_file_path",
+                        type=str,
+                        help="Path of the category map to show what categories map to what",
+                        default="hello.jpg") 
+
     parser.add_argument("--dataset_id", 
                         default="")
     parser.add_argument("--dataset_name", 
@@ -83,7 +79,7 @@ if __name__ == "__main__":
         task.connect(args)
 
         # Set base Docker image
-        task.set_base_docker("harbor.dsta.ai/public/drift_expt_base:1b")
+        task.set_base_docker("harbor.dsta.ai/public/cvrob_image:latest")
         # task.set_repo('http://gitlab.dev.pc8.dsta/BJIEYONG/drift-metric-expt/tree/main/aip_scripts')
         # task.set_script(repository='http://gitlab.dev.pc8.dsta/BJIEYONG/drift-metric-expt.git',
         #                 branch='main',
@@ -94,7 +90,6 @@ if __name__ == "__main__":
         # Remote Execution
         # -------------------
         # only create task, execute later
-        #task.execute_remotely(queue_name="queue-1xV100-16ram") 
         # Putting this on the GPU is technically faster, but it eats up all the GPUs on clearml which screws everyone else over so.
         task.execute_remotely(queue_name="queue-cpu-only-large")
 
@@ -103,16 +98,8 @@ if __name__ == "__main__":
     except Exception as e:
         print("Clearml Exception: {0:s}\n".format(str(e)))
 
-    device = torch.device('cpu') 
-    #import data
-
-    # if CLEARML_INITIALIZED:
-    #     #TODO Storage Manager case
-    #     data_path = Dataset.get(dataset_id=args.data_file_path).get_local_copy()
-    #     catmap_path = Dataset.get(dataset_id=args.catmap_file_path).get_local_copy()
-    #     data_df = pd.read_csv(data_path)      
-    #     with open(catmap_path, 'rb') as handle:
-    #         category_map = pickle.load(handle)        
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    #import data      
     if CLEARML_INITIALIZED:
         # Get a local copy of the data
         # Technicallyyyy all of these work but I couldn't find the way to get dataset_id to work, despite it being the "good" way
@@ -142,34 +129,27 @@ if __name__ == "__main__":
         print()
 
     else:
-        DATA_DIR = os.path.join('..', 'data')
+        DATA_DIR = os.path.join('')
         print("Data directory from local machine:", DATA_DIR)
         print()
 
-
     model = torch.load(os.path.join(DATA_DIR, args.model_file_path), weights_only=False)
     test_dataset = torch.load(os.path.join(DATA_DIR, args.test_file_path), weights_only=False)
-    with open('config.yaml', 'r') as file:
-        param_dict = yaml.safe_load(file)
+    with open(os.path.join(DATA_DIR, args.params_file_path), 'r') as file:
+        param_dict = yaml.safe_load(file) 
 
-    device = torch.device("cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
 
-    list_of_methods = [ label_update_indice_method, 
-                       wrong_prediction_indice_method,
-                        loss_indice_method,
-                        aum_indice_method,
-                        fine_indice_method,
-                        cleanlab_indice_method,
-                        deep_knn_indice_method]
+    list_of_methods = get_all_label_noise_methods()
     noisy_indices_all, true_noisy_indices, test_loader = label_noise_method(test_dataset, 
                                                                             model, 
                                                                             device,
                                                                             list_of_methods, 
                                                                             param_dict,
                                                                             evaluate=False, 
-                                                                            noise_ratio=69, 
-                                                                            batch_size=5)
+                                                                            noise_ratio=0, 
+                                                                            batch_size=param_dict['batch_size'])
 
     final_noisy_indices = ensemble_method(noisy_indices_all)
     print('final noisy indices, ', final_noisy_indices)
@@ -189,32 +169,55 @@ if __name__ == "__main__":
         )
         aug_dict[lib] = aug_dict_g
     
+    train_dataset = torch.load(os.path.join(DATA_DIR, args.train_file_path), weights_only=False)
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=param_dict['batch_size'], shuffle=True)
+    clean_test_dataset = torch.load(os.path.join(DATA_DIR, args.test_file_path), weights_only=False)
+    clean_test_loader = torch.utils.data.DataLoader(clean_test_dataset, batch_size=param_dict['batch_size'], shuffle=False)
+
+    model_copy, model_no_weights, test_acc_dict = retrain_experiment(model, 
+                                                                     train_loader, 
+                                                                     clean_test_loader, 
+                                                                     device,
+                                                                     get_partially_corrupted_imagecorr_dataloader)
+    
+    img_array = get_image_from_path(args.image_file_path)
+    fig_dict = {}
+    for lib in augmentation_libraries:
+        augmentation_list, augmentation_str, corrupt_func = get_corruption_helpers(lib)
+        fig = corrupt_and_plot_generic(img_array, augmentation_list, augmentation_str, corrupt_func, filename=None)
+        fig_dict[lib] = fig
+
+    if CLEARML_INITIALIZED:
+        for lib, fig in fig_dict.items():
+            task.get_logger().report_plotly(
+                title="Library "+lib, 
+                series="Plotly Figure for augmented ship picture",
+                iteration=0,
+                figure=fig
+            )
+
     # Create/define output directory
-    OUTPUT_DIR = ".."
+    OUTPUT_DIR = ""
     OUTPUT_DIR = os.path.join(OUTPUT_DIR, "outputs")
     if not os.path.isdir(OUTPUT_DIR):
         os.mkdir(OUTPUT_DIR)    
             
     final_noisy_indices_path = os.path.join(OUTPUT_DIR, 'final_noisy_indices'+args.file_name_appendum+'.pickle') 
     augmentation_result_dict_path = os.path.join(OUTPUT_DIR, 'augmentation_result_dict'+args.file_name_appendum+'.pickle') 
-    # drift_dict_path = os.path.join(OUTPUT_DIR, 'drift_dict'+args.file_name_appendum+'.pickle')
-    # driftgen_dict_path = os.path.join(OUTPUT_DIR, 'driftgen_dict'+args.file_name_appendum+'.pickle')
-    # feat_ext_set_path = os.path.join(OUTPUT_DIR, 'feat_ext_set'+args.file_name_appendum+'.pickle')
+    test_acc_dict_path = os.path.join(OUTPUT_DIR, 'test_acc_dict'+args.file_name_appendum+'.pickle') 
+    fig_dict_path = os.path.join(OUTPUT_DIR, 'fig_dict'+args.file_name_appendum+'.pickle') 
 
     with open(final_noisy_indices_path, 'wb') as handle:
         pickle.dump(final_noisy_indices, handle, protocol=pickle.HIGHEST_PROTOCOL) 
     with open(augmentation_result_dict_path, 'wb') as handle:
         pickle.dump(aug_dict, handle, protocol=pickle.HIGHEST_PROTOCOL) 
-    # with open(drift_dict_path, 'wb') as handle:
-    #     pickle.dump(drift_dict, handle, protocol=pickle.HIGHEST_PROTOCOL) 
-    # with open(driftgen_dict_path, 'wb') as handle:
-    #     pickle.dump(driftgen_dict, handle, protocol=pickle.HIGHEST_PROTOCOL) 
-    # # with open(feat_ext_set_path, 'wb') as handle:
-    #     pickle.dump(feat_ext_set, handle, protocol=pickle.HIGHEST_PROTOCOL) 
+    with open(test_acc_dict_path, 'wb') as handle:
+        pickle.dump(test_acc_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    with open(fig_dict_path, 'wb') as handle:
+        pickle.dump(fig_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
     if CLEARML_INITIALIZED:
         task.upload_artifact("final_noisy_indices", artifact_object=final_noisy_indices_path)
         task.upload_artifact("aug_dict", artifact_object=augmentation_result_dict_path)
-        # task.upload_artifact("drift_dict", artifact_object=drift_dict_path)
-        # task.upload_artifact("driftgen_dict", artifact_object=driftgen_dict_path)
-        #task.upload_artifact("feat_ext_set", artifact_object=feat_ext_set_path)
+        task.upload_artifact("test_acc_dict", artifact_object=test_acc_dict_path)
+        task.upload_artifact("fig_dict", artifact_object=fig_dict_path)

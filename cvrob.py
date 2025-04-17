@@ -23,6 +23,8 @@ from skimage import io
 import requests
 from PIL import Image
 from io import BytesIO
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 from imagecorruptions import corrupt
 import albumentations as A
@@ -74,6 +76,65 @@ def corrupt_func_imagecorrupt(images_np, severity, param_dict):
 
 def corrupt_and_plot_generic(img, augmentations, aug_names, corrupt_func, filename=None):
     severities = [0, 1, 2]
+    rows = len(augmentations)
+    cols = len(severities)
+    
+    # Create a subplot grid
+    fig = make_subplots(rows=rows, cols=cols,
+                        subplot_titles=[f"Severity {s}" for s in severities] * (1 if rows == 1 else 0),
+                        vertical_spacing=0.02, horizontal_spacing=0.02)
+
+    for i, (aug_class, param_dict) in enumerate(augmentations):
+        param_dict['aug_method'] = aug_class
+        for j, severity in enumerate(severities):
+            # Apply corruption
+            corrupted_img = img if severity == 0 else corrupt_func([img], severity, param_dict)[0]
+            # Convert to uint8 if needed
+            if corrupted_img.dtype != np.uint8:
+                corrupted_img = np.clip(corrupted_img, 0, 255).astype(np.uint8)
+
+            # Add image to subplot
+            fig.add_trace(
+                go.Image(z=corrupted_img),
+                row=i + 1,
+                col=j + 1
+            )
+
+            # Custom Y-axis label (as annotation)
+            if j == 0:
+                fig.add_annotation(
+                    text=aug_names[i],
+                    xref="paper", yref="paper",
+                    x=0, y=1 - (i / rows),
+                    showarrow=False,
+                    font=dict(size=12),
+                    xanchor="right",
+                    yanchor="middle"
+                )
+
+    # Set layout
+    fig.update_layout(
+        height=150 * rows,
+        width=200 * cols,
+        title_text="Corrupted Image Grid (by Severity & Augmentation)",
+        showlegend=False
+    )
+
+    # Hide axes
+    for i in range(1, rows + 1):
+        for j in range(1, cols + 1):
+            fig.update_xaxes(showticklabels=False, showgrid=False, zeroline=False, row=i, col=j)
+            fig.update_yaxes(showticklabels=False, showgrid=False, zeroline=False, row=i, col=j)
+
+    # Save to file if filename is provided
+    if filename:
+        fig.write_image(filename)
+
+    fig.show()
+    return fig
+
+def corrupt_and_plot_generic_mpl(img, augmentations, aug_names, corrupt_func, filename=None):
+    severities = [0, 1, 2]
     fig, axes = plt.subplots(len(augmentations), len(severities), figsize=(15, 15))
     
     for i, (aug_class, param_dict) in enumerate(augmentations):
@@ -97,6 +158,8 @@ def corrupt_and_plot_generic(img, augmentations, aug_names, corrupt_func, filena
     if filename is not None:
         fig.savefig(filename)
 
+    return fig
+
 def get_image_from_url(image_url):
     # Fetch the image
     response = requests.get(image_url)
@@ -104,7 +167,7 @@ def get_image_from_url(image_url):
     image_array = np.array(image)
     return image_array
 
-def get_image_from_url(image_path):
+def get_image_from_path(image_path):
     image = Image.open(image_path)
     image_np = np.array(image)
     return image_np
@@ -503,6 +566,15 @@ def ensemble_method(noisy_indices_all):
 
     print(f"Final Noisy Indices ({len(final_noisy_indices)} samples)")
     return final_noisy_indices
+
+def get_all_label_noise_methods():
+    return [label_update_indice_method, 
+            wrong_prediction_indice_method,
+            loss_indice_method,
+            aum_indice_method,
+            fine_indice_method,
+            cleanlab_indice_method,
+            deep_knn_indice_method]
 
 def label_noise_method(test_dataset, 
                        model, 

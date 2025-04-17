@@ -8,43 +8,45 @@ from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms as transforms
 import numpy as np
 
-class ImageLabelDataset(Dataset):
-    def __init__(self, csv_file, root_dir, transform=None):
-        self.labels_df = pd.read_csv(csv_file)
-        self.root_dir = root_dir
-        self.transform = transform
+# class ImageLabelDataset(Dataset):
+#     def __init__(self, csv_file, root_dir, transform=None):
+#         self.labels_df = pd.read_csv(csv_file)
+#         self.root_dir = root_dir
+#         self.transform = transform
 
-    def __len__(self):
-        return len(self.labels_df)
+#     def __len__(self):
+#         return len(self.labels_df)
 
-    def __getitem__(self, idx):
-        img_file = self.labels_df.iloc[idx]['image']
-        label = int(self.labels_df.iloc[idx]['label'])
+#     def __getitem__(self, idx):
+#         img_file = self.labels_df.iloc[idx]['image']
+#         label = int(self.labels_df.iloc[idx]['label'])
 
-        img_path = os.path.join(self.root_dir, str(img_file))
-        image = Image.open(img_path).convert("RGB")
+#         img_path = os.path.join(self.root_dir, str(img_file))
+#         image = Image.open(img_path).convert("RGB")
 
-        if self.transform:
-            image = self.transform(image)
+#         if self.transform:
+#             image = self.transform(image)
 
-        return image, label
+#         return image, label
 
 
-model = torch.load('efficient_full.pt', weights_only=False)
 
-# Define any transformations you want
-transform = transforms.Compose([
-    transforms.ToTensor(),
-])
 
-dataset = ImageLabelDataset(csv_file='selected_images_labels_50.csv', root_dir='X_reference_png_50', transform=transform)
+# # Define any transformations you want
+# transform = transforms.Compose([
+#     transforms.ToTensor(),
+# ])
 
-all_images = torch.stack([data[0] for data in dataset])
-all_labels = torch.tensor([data[1] for data in dataset])
-test_dataset = torch.utils.data.TensorDataset(all_images, all_labels)
+# dataset = ImageLabelDataset(csv_file='selected_images_labels_50.csv', root_dir='X_reference_png_50', transform=transform)
+
+# all_images = torch.stack([data[0] for data in dataset])
+# all_labels = torch.tensor([data[1] for data in dataset])
+# test_dataset = torch.utils.data.TensorDataset(all_images, all_labels)
 # test_loader = DataLoader(dataset, batch_size=5, shuffle=False)
+test_dataset = torch.load("dataset_ships.pt", weights_only=False)
 
 device = torch.device("cpu")
+model = torch.load('efficient_full.pt', weights_only=False)
 model.to(device)
 
 list_of_methods = [ label_update_indice_method, 
@@ -73,14 +75,15 @@ print('final noisy indices, ', final_noisy_indices)
 
 print("noisy indices done! let's go to: robustness evaluation")
 
-augmentation_list, augmentation_str, corrupt_func = get_corruption_helpers('album')
-aug_dict_g = generic_combination_gradients(
-    model, 
-    test_loader, 
-    device, 
-    corrupt_func, 
-    augmentation_list, 
-    augmentation_str, 
-    plot_graphs=False
-)
-print(aug_dict_g)
+for lib in ['album', 'nrtk', 'augly', 'ic']:
+    augmentation_list, augmentation_str, corrupt_func = get_corruption_helpers('album')
+    aug_dict_g = generic_combination_gradients(
+        model, 
+        test_loader, 
+        device, 
+        corrupt_func, 
+        augmentation_list, 
+        augmentation_str, 
+        plot_graphs=False
+    )
+    print(aug_dict_g)
