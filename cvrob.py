@@ -74,7 +74,7 @@ def corrupt_func_imagecorrupt(images_np, severity, param_dict):
     corrupted_imgs = np.array([ corrupt(img.astype(np.uint8), corruption_name=aug_func, severity=severity) for img in images_np ])
     return corrupted_imgs
 
-def corrupt_and_plot_generic(img, augmentations, aug_names, corrupt_func, filename=None):
+def corrupt_and_plot_generic_plotly(img, augmentations, aug_names, corrupt_func, filename=None):
     severities = [0, 1, 2]
     rows = len(augmentations)
     cols = len(severities)
@@ -159,6 +159,14 @@ def corrupt_and_plot_generic_mpl(img, augmentations, aug_names, corrupt_func, fi
         fig.savefig(filename)
 
     return fig
+
+def corrupt_and_plot_generic(img, augmentations, aug_names, corrupt_func, filename=None, graph_lib='matplotlib'):
+    if graph_lib == 'matplotlib':
+        return corrupt_and_plot_generic_mpl(img, augmentations, aug_names, corrupt_func, filename)
+    elif graph_lib == 'plotly':
+        return corrupt_and_plot_generic_plotly(img, augmentations, aug_names, corrupt_func, filename)
+    else:
+        raise ValueError('not valid graphing library')
 
 def get_image_from_url(image_url):
     # Fetch the image
@@ -357,6 +365,9 @@ def get_logits(model, dataloader, device):
         test_loader (torch.Dataloader): data loader for test data
         model (torch.nn.Module): torch model
         device (torch.device): device model is on
+
+    Returns: 
+        logits (np.array): array of outputs just before they pass through the softmax/max/last layer for prediction
     """
     labels = np.empty((0,))
 
@@ -496,9 +507,9 @@ def cleanlab_indice_method(test_loader, model, device='cpu'):
     Uses cleanlab to detect noisy labels in the test set.
 
     Args:
-        test_loader: DataLoader containing noisy test set.
-        model: Trained model.
-        device: CUDA/CPU device.
+        test_loader (torch.Dataloader): data loader for test data
+        model (torch.nn.Module): torch model
+        device (torch.device): device model is on
     """
     features, labels = get_logits(model, test_loader, device)
     labels = [int(l) for l in labels]
@@ -662,16 +673,16 @@ def get_album_augmentations_list():
 
 def get_nrtk_augmentations_list(seed=42):
     perturbations = [
-        (SaltNoisePerturber, {'rng': seed, 'amount': lambda s: 0.15 * s}),
-        (PepperNoisePerturber, {'rng': np.random.default_rng(seed), 'amount': lambda s: 0.15 * s}),
+        # (SaltNoisePerturber, {'rng': seed, 'amount': lambda s: 0.15 * s}),
+        # (PepperNoisePerturber, {'rng': np.random.default_rng(seed), 'amount': lambda s: 0.15 * s}),
         (SaltAndPepperNoisePerturber, {'rng': np.random.default_rng(seed), 'amount': lambda s: 0.15 * s}),
         (GaussianNoisePerturber, {'rng': seed, 'mean': lambda s: 0.1 * s, 'var': lambda s: 0.01 * s}),
-        (SpeckleNoisePerturber, {'rng': seed, 'mean': lambda s: 0.3 * s, 'var': lambda s: 0.01 * s}),
-        (AverageBlurPerturber, {'ksize': lambda s: 11 + 2 * s}),
+        # (SpeckleNoisePerturber, {'rng': seed, 'mean': lambda s: 0.3 * s, 'var': lambda s: 0.01 * s}),
+        # (AverageBlurPerturber, {'ksize': lambda s: 11 + 2 * s}),
         (GaussianBlurPerturber, {'ksize': lambda s: 11 + 4 * s}),
-        (MedianBlurPerturber, {'ksize': lambda s: 11 + 2 * s}),
+        # (MedianBlurPerturber, {'ksize': lambda s: 11 + 2 * s}),
         (BrightnessPerturber, {'factor': lambda s: 1 + 0.15 * s}),
-        (ColorPerturber, {'factor': lambda s: 1 - 0.15 * s}),
+        # (ColorPerturber, {'factor': lambda s: 1 - 0.15 * s}),
         (ContrastPerturber, {'factor': lambda s: 1 + 0.2 * s}),
         (SharpnessPerturber, {'factor': lambda s: 1 - 0.2 * s}),
     ]
@@ -721,6 +732,18 @@ def get_corruption_helpers(library='albumentations'):
         raise ValueError('Invalid library called')
 
 def get_corrupted_dataloader(testloader, corr_func, severity=1, corr_kwargs=None):
+    """
+    Make a dataloader with data that is of the augmented/corrupted version of the original dataloader
+
+    Args:
+        testloader (torch.Dataloader): original dataloader
+        corr_func (function): corruption function  that takes in ([numpy array of images], severity, corr_kwargs)
+        severity (int); extent of severity between 0-5.
+        corr_kwargs (dict): dictionary of extra parameters to send into corr_func
+
+    Returns:
+        corrupted_dataloader (torch.Dataloader): corrupted version of original dataloader
+    """
     if corr_kwargs is None:
         corr_kwargs = {}  # Default to an empty dictionary
     
@@ -744,12 +767,12 @@ def best_fit_gradient(x_values, y_values):
     """
     Calculate the gradient (slope) of the best-fit line using the least squares method.
     
-    Parameters:
-    x_values (list or array): Independent variable values.
-    y_values (list or array): Dependent variable values.
+    Args:
+        x_values (list or array): Independent variable values.
+        y_values (list or array): Dependent variable values.
     
     Returns:
-    float: Slope of the best-fit line.
+        loat: Slope of the best-fit line.
     """
     x_mean = np.mean(x_values)
     y_mean = np.mean(y_values)
@@ -777,27 +800,65 @@ def augmentation_gradient(model, test_loader, device, corr_func, plot_graphs=Fal
         print(f"Accuracy at severity {severity}: {acc:.4f}")
 
     # Plot results
+    fig = None
     if plot_graphs:
-        plt.figure(figsize=(8, 5))
-        plt.plot(severities, accuracies, marker='o', linestyle='-', color='b')
-        plt.xlabel("Severity")
-        plt.ylabel("Accuracy")
-        plt.title("Model Accuracy vs Severity")
-        plt.xticks(severities)
-        plt.grid(True)
-        plt.show()    
-    return best_fit_gradient(severities, accuracies), accuracies
+        fig = plot_accuracy_vs_severity(accuracies, severities)  
+    return best_fit_gradient(severities, accuracies), accuracies, fig
 
-def plot_accuracy_vs_severity(accuracies):
-    severities = list(range(len(accuracies)))
-    plt.figure(figsize=(8, 5))
-    plt.plot(severities, accuracies, marker='o', linestyle='-', color='b')
-    plt.xlabel("Severity")
-    plt.ylabel("Accuracy")
-    plt.title("Model Accuracy vs Severity")
-    plt.xticks(severities)
-    plt.grid(True)
-    plt.show()  
+def plot_accuracy_vs_severity(accuracies, severities=None, graph_lib='matplotlib'):
+    if graph_lib == 'matplotlib':
+        return plot_accuracy_vs_severity_mpl(accuracies, severities)
+    elif graph_lib == 'plotly':
+        return plot_accuracy_vs_severity_plotly(accuracies, severities)
+    else:
+        raise ValueError('not valid graphing library')
+
+def plot_accuracy_vs_severity_mpl(accuracies, severities=None):
+    if severities is None:
+        severities = list(range(len(accuracies)))
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.plot(severities, accuracies, marker='o', linestyle='-', color='b')
+    ax.set_xlabel("Severity")
+    ax.set_ylabel("Accuracy")
+    ax.set_title("Model Accuracy vs Severity")
+    ax.set_xticks(severities)
+    ax.grid(True)
+    
+    plt.show()
+    return fig
+
+def plot_accuracy_vs_severity_plotly(accuracies, severities=None):
+    if severities is None:
+        severities = list(range(len(accuracies)))
+
+    fig = go.Figure()
+
+    # Add line plot with markers
+    fig.add_trace(go.Scatter(
+        x=severities,
+        y=accuracies,
+        mode='lines+markers',
+        line=dict(color='blue'),
+        marker=dict(size=8),
+        name='Accuracy'
+    ))
+
+    # Update layout
+    fig.update_layout(
+        title='Model Accuracy vs Severity',
+        xaxis_title='Severity',
+        yaxis_title='Accuracy',
+        xaxis=dict(tickmode='array', tickvals=severities),
+        yaxis=dict(range=[0, 1] if max(accuracies) <= 1 else None),
+        width=800,
+        height=500,
+        template='simple_white'
+    )
+
+    fig.show()
+    return fig
+
 
 def generic_combination_gradients(
     model, 
@@ -813,17 +874,19 @@ def generic_combination_gradients(
 
     model = model.to(device)
     augmentation_dict = {}
+    augmentation_fig_dict = {}
     for k, (m,d) in zip(augmentation_str, augmentation_list):
         d['aug_method'] = m
-        gradient, accuracies = augmentation_gradient(model, test_loader, device, augmentation_func_wrapper, plot_graphs, d)
+        gradient, accuracies, fig = augmentation_gradient(model, test_loader, device, augmentation_func_wrapper, plot_graphs, d)
         first_drop = accuracies[1] - accuracies[0]
         
         print(accuracies, first_drop)
         print(k, 'augmentation method gradient:', gradient)
         augmentation_dict[k] = (gradient, first_drop)
+        augmentation_fig_dict[k] = fig
         
         print()
-    return augmentation_dict                                                                                                                                                                                                                                                                                                           
+    return augmentation_dict, augmentation_fig_dict                                                                                                                                                                                                                                                                                                           
 
 # =============================================================================================
 
@@ -954,7 +1017,7 @@ if __name__ == "__main__":
     clean_test_loader = torch.utils.data.DataLoader(clean_test_dataset, batch_size=128, shuffle=False)
 
     augmentation_list, augmentation_str, corrupt_func = get_corruption_helpers('nrtk')
-    aug_dict_g = generic_combination_gradients(
+    aug_dict_g, aug_dict_f = generic_combination_gradients(
         model, 
         test_loader, 
         device, 
@@ -963,7 +1026,6 @@ if __name__ == "__main__":
         augmentation_str, 
         plot_graphs=False
     )
-    
     
     print(aug_dict_g)
 

@@ -47,7 +47,7 @@ test_dataset = torch.load("dataset_ships.pt", weights_only=False)
 
 device = torch.device("cpu")
 model = torch.load('efficient_full.pt', weights_only=False)
-model.to(device)
+model = model.to(device)
 
 list_of_methods = [ label_update_indice_method, 
                     loss_indice_method,
@@ -77,7 +77,7 @@ print("noisy indices done! let's go to: robustness evaluation")
 
 for lib in ['album', 'nrtk', 'augly', 'ic']:
     augmentation_list, augmentation_str, corrupt_func = get_corruption_helpers('album')
-    aug_dict_g = generic_combination_gradients(
+    aug_dict_g, aug_dict_f = generic_combination_gradients(
         model, 
         test_loader, 
         device, 

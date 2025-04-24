@@ -155,10 +155,10 @@ if __name__ == "__main__":
     print('final noisy indices, ', final_noisy_indices)
 
     augmentation_libraries = args.augmentation_libraries.split(",")
-    aug_dict = {}
+    aug_dict = {}; aug_fig_dict = {}
     for lib in augmentation_libraries:
         augmentation_list, augmentation_str, corrupt_func = get_corruption_helpers(lib)
-        aug_dict_g = generic_combination_gradients(
+        aug_dict_g, aug_dict_f = generic_combination_gradients(
             model, 
             test_loader, 
             device, 
@@ -168,6 +168,7 @@ if __name__ == "__main__":
             plot_graphs=False
         )
         aug_dict[lib] = aug_dict_g
+        aug_fig_dict[lib] = aug_dict_f
     
     train_dataset = torch.load(os.path.join(DATA_DIR, args.train_file_path), weights_only=False)
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=param_dict['batch_size'], shuffle=True)
@@ -196,6 +197,15 @@ if __name__ == "__main__":
                 figure=fig
             )
 
+        for lib, d in aug_fig_dict.items():
+            for aug_str, fig in d.items():
+                task.get_logger().report_plotly(
+                    title="Library "+lib+" & augmentation method "+aug_str, 
+                    series="Plotly Graph for augmentation method accuracy vs severity",
+                    iteration=0,
+                    figure=fig
+                )
+ 
     # Create/define output directory
     OUTPUT_DIR = ""
     OUTPUT_DIR = os.path.join(OUTPUT_DIR, "outputs")
