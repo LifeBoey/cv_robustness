@@ -5,6 +5,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import argparse
 import pickle
 import torch
+import io
 import yaml
 from cvrob import (label_noise_method,
                     ensemble_method,
@@ -42,6 +43,23 @@ if __name__ == "__main__":
                         help="Path of the category map to show what categories map to what",
                         default="album,nrtk") 
     parser.add_argument("image_file_path",
+                        type=str,
+                        help="Path of the category map to show what categories map to what",
+                        default="hello.jpg") 
+    
+    parser.add_argument("endpoint_url",
+                        type=str,
+                        help="Path of the category map to show what categories map to what",
+                        default="hello.jpg") 
+    parser.add_argument("access_key",
+                        type=str,
+                        help="Path of the category map to show what categories map to what",
+                        default="hello.jpg") 
+    parser.add_argument("secret_key",
+                        type=str,
+                        help="Path of the category map to show what categories map to what",
+                        default="hello.jpg") 
+    parser.add_argument("bucket_name",
                         type=str,
                         help="Path of the category map to show what categories map to what",
                         default="hello.jpg") 
@@ -129,14 +147,50 @@ if __name__ == "__main__":
         print()
 
     else:
-        DATA_DIR = os.path.join('')
-        print("Data directory from local machine:", DATA_DIR)
-        print()
+        try:
+            import boto3; from botocore.client import Config
+            s3 = boto3.client(
+                's3',
+                endpoint_url = args.endpoint_url,
+                aws_access_key_id = args.access_key,
+                aws_secret_access_key = args.secret_key,
+                config=Config(signature_version='s3v4'),
+                region_name = 'us-east-1',
+                verify = False
+            )
+            DATA_DIR = 's3'
 
-    model = torch.load(os.path.join(DATA_DIR, args.model_file_path), weights_only=False)
-    test_dataset = torch.load(os.path.join(DATA_DIR, args.test_file_path), weights_only=False)
-    with open(os.path.join(DATA_DIR, args.params_file_path), 'r') as file:
-        param_dict = yaml.safe_load(file) 
+        except:
+            DATA_DIR = os.path.join('')
+            print("Data directory from local machine:", DATA_DIR)
+            print()
+
+    if DATA_DIR == 's3':
+        response = s3.get_object(Bucket=args.bucket_name, Key='bjieyong/'+args.model_file_path)
+        pt_bytes = response['Body'].read(); buffer = io.BytesIO(pt_bytes)
+        model = torch.load(buffer, weights_only=False)
+        response = s3.get_object(Bucket=args.bucket_name, Key='bjieyong/'+args.test_file_path)
+        pt_bytes = response['Body'].read(); buffer = io.BytesIO(pt_bytes)
+        train_dataset = torch.load(buffer, weights_only=False)
+        response = s3.get_object(Bucket=args.bucket_name, Key='bjieyong/'+args.test_file_path)
+        pt_bytes = response['Body'].read(); buffer = io.BytesIO(pt_bytes)
+        test_dataset = torch.load(buffer, weights_only=False)
+        response = s3.get_object(Bucket=args.bucket_name, Key='bjieyong/'+args.test_file_path)
+        pt_bytes = response['Body'].read(); buffer = io.BytesIO(pt_bytes)
+        clean_test_dataset = torch.load(buffer, weights_only=False)
+        response = s3.get_object(Bucket=args.bucket_name, Key='bjieyong/'+args.params_file_path)
+        yaml_bytes = response['Body'].read(); yaml_text = yaml_bytes.decode('utf-8')
+        param_dict = yaml.safe_load(yaml_text) 
+    else:
+        model = torch.load(os.path.join(DATA_DIR, args.model_file_path), weights_only=False)
+        test_dataset = torch.load(os.path.join(DATA_DIR, args.test_file_path), weights_only=False)
+        with open(os.path.join(DATA_DIR, args.params_file_path), 'r') as file:
+            param_dict = yaml.safe_load(file) 
+        train_dataset = torch.load(os.path.join(DATA_DIR, args.train_file_path), weights_only=False)
+        clean_test_dataset = torch.load(os.path.join(DATA_DIR, args.test_file_path), weights_only=False)
+
+    clean_test_loader = torch.utils.data.DataLoader(clean_test_dataset, batch_size=param_dict['batch_size'], shuffle=False)
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=param_dict['batch_size'], shuffle=True)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
@@ -170,10 +224,6 @@ if __name__ == "__main__":
         aug_dict[lib] = aug_dict_g
         aug_fig_dict[lib] = aug_dict_f
     
-    train_dataset = torch.load(os.path.join(DATA_DIR, args.train_file_path), weights_only=False)
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=param_dict['batch_size'], shuffle=True)
-    clean_test_dataset = torch.load(os.path.join(DATA_DIR, args.test_file_path), weights_only=False)
-    clean_test_loader = torch.utils.data.DataLoader(clean_test_dataset, batch_size=param_dict['batch_size'], shuffle=False)
 
     model_copy, model_no_weights, test_acc_dict = retrain_experiment(model, 
                                                                      train_loader, 
@@ -185,7 +235,12 @@ if __name__ == "__main__":
     fig_dict = {}
     for lib in augmentation_libraries:
         augmentation_list, augmentation_str, corrupt_func = get_corruption_helpers(lib)
-        fig = corrupt_and_plot_generic(img_array, augmentation_list, augmentation_str, corrupt_func, filename=None)
+        fig = corrupt_and_plot_generic(img_array, 
+                                       augmentation_list, 
+                                       augmentation_str, 
+                                       corrupt_func, 
+                                       filename=None,
+                                       graph_lib='plotly')
         fig_dict[lib] = fig
 
     if CLEARML_INITIALIZED:

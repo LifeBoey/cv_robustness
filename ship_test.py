@@ -42,8 +42,9 @@ import numpy as np
 # all_images = torch.stack([data[0] for data in dataset])
 # all_labels = torch.tensor([data[1] for data in dataset])
 # test_dataset = torch.utils.data.TensorDataset(all_images, all_labels)
-# test_loader = DataLoader(dataset, batch_size=5, shuffle=False)
+
 test_dataset = torch.load("dataset_ships.pt", weights_only=False)
+test_loader = DataLoader(test_dataset, batch_size=5, shuffle=False)
 
 device = torch.device("cpu")
 model = torch.load('efficient_full.pt', weights_only=False)
@@ -61,22 +62,22 @@ with open('config.yaml', 'r') as file:
     param_dict = yaml.safe_load(file)
 
 param_dict['num_epochs'] = 5
-noisy_indices_all, true_noisy_indices, test_loader = label_noise_method(test_dataset, 
-                                                                        model, 
-                                                                        device,
-                                                                        list_of_methods, 
-                                                                        param_dict,
-                                                                        evaluate=False, 
-                                                                        noise_ratio=69, 
-                                                                        batch_size=5)
+# noisy_indices_all, true_noisy_indices, test_loader = label_noise_method(test_dataset, 
+#                                                                         model, 
+#                                                                         device,
+#                                                                         list_of_methods, 
+#                                                                         param_dict,
+#                                                                         evaluate=False, 
+#                                                                         noise_ratio=69, 
+#                                                                         batch_size=5)
 
-final_noisy_indices = ensemble_method(noisy_indices_all)
-print('final noisy indices, ', final_noisy_indices)
+# final_noisy_indices = ensemble_method(noisy_indices_all)
+# print('final noisy indices, ', final_noisy_indices)
 
 print("noisy indices done! let's go to: robustness evaluation")
 
-for lib in ['album', 'nrtk', 'augly', 'ic']:
-    augmentation_list, augmentation_str, corrupt_func = get_corruption_helpers('album')
+for lib in ['augly', 'ic']:
+    augmentation_list, augmentation_str, corrupt_func = get_corruption_helpers(lib)
     aug_dict_g, aug_dict_f = generic_combination_gradients(
         model, 
         test_loader, 
@@ -84,6 +85,6 @@ for lib in ['album', 'nrtk', 'augly', 'ic']:
         corrupt_func, 
         augmentation_list, 
         augmentation_str, 
-        plot_graphs=False
+        plot_graphs='plotly'
     )
     print(aug_dict_g)

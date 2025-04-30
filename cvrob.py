@@ -559,7 +559,7 @@ def deep_knn_indice_method(test_loader, model, device='cpu', k=500, thres=20):
 
     return noisy_indices
 
-def ensemble_method(noisy_indices_all):
+def ensemble_method(noisy_indices_all, strictness=1):
     """
     Ensemble method for how to determine the final indices given the conglomerate of indices
 
@@ -571,8 +571,7 @@ def ensemble_method(noisy_indices_all):
     all_noisy_indices = [idx for s in noisy_sets for idx in s]
     count_dict = Counter(all_noisy_indices)
 
-    # Majority voting: keep indices that appear in at least 3 out of 5 methods
-    threshold = len(noisy_sets)//2  + 1 # Change this value if needed
+    threshold = len(noisy_sets)//2  + strictness
     final_noisy_indices = {idx for idx, count in count_dict.items() if count >= threshold}
 
     print(f"Final Noisy Indices ({len(final_noisy_indices)} samples)")
@@ -643,6 +642,13 @@ def label_noise_method(test_dataset,
 # ============================================================================================
 
 def get_album_augmentations_list():
+    """
+    Get the augmentation list and string for albumentations.
+
+    Returns:
+        augmentation_list (list): list of two-length tuples 
+        augmentation_str (list): list of names of the given libraries
+    """
     augmentations_album = [
         (A.RandomRain, {'slant_range': (0, 30), 
                         'drop_length': lambda s: 2*s, 
@@ -672,6 +678,16 @@ def get_album_augmentations_list():
     return augmentations_album, aug_names_album
 
 def get_nrtk_augmentations_list(seed=42):
+    """
+    Get the augmentation list and string for nrtk.
+
+    Args:
+        seed (int): random seed (fixed for now)
+
+    Returns:
+        augmentation_list (list): list of two-length tuples 
+        augmentation_str (list): list of names of the given libraries
+    """
     perturbations = [
         # (SaltNoisePerturber, {'rng': seed, 'amount': lambda s: 0.15 * s}),
         # (PepperNoisePerturber, {'rng': np.random.default_rng(seed), 'amount': lambda s: 0.15 * s}),
@@ -691,6 +707,13 @@ def get_nrtk_augmentations_list(seed=42):
     return perturbations, perturb_names
 
 def get_augly_augmentations_list():
+    """
+    Get the augmentation list and string for augly.
+
+    Returns:
+        augmentation_list (list): list of two-length tuples 
+        augmentation_str (list): list of names of the given libraries
+    """
     augmentations = [
         (blur, {'radius': lambda s: s}),  # Corrected: Replaced 'severity' with lambda
         (brightness, {'factor': lambda s: 1 + 0.1 * s}),
@@ -701,6 +724,13 @@ def get_augly_augmentations_list():
     return augmentations, aug_str
 
 def get_imagecorrupt_augmentations_list():
+    """
+    Get the augmentation list and string for imagecorrupt.
+
+    Returns:
+        augmentation_list (list): list of two-length tuples 
+        augmentation_str (list): list of names of the given libraries
+    """
     # gaussian_noise, shot_noise, impulse_noise, defocus_blur,
     #                 glass_blur, motion_blur, zoom_blur, snow, frost, fog,
     #                 brightness, contrast, elastic_transform, pixelate,
@@ -716,6 +746,19 @@ def get_imagecorrupt_augmentations_list():
     return augmentations, aug_str
 
 def get_corruption_helpers(library='albumentations'):
+    """
+    Returns the corruption parameters associated with a given library
+
+    Two-length tuples: first being corruption function (pure from library), second being parameters to be passed in
+
+    Args:
+        library (str): corruption library name
+    
+    Returns:
+        augmentation_list (list): list of two-length tuples 
+        augmentation_str (list): list of names of the given libraries
+        corrupt_func (function): custom corrupt function: takes in images np array, severity, and augmentation parameters and returns corrupted images np array
+    """
     if library in ['albumentations', 'album']:
         a1, a2 = get_album_augmentations_list()
         return a1, a2, corrupt_func_album
@@ -727,9 +770,9 @@ def get_corruption_helpers(library='albumentations'):
         return i1, i2, corrupt_func_imagecorrupt
     if library in ['augly']:
         u1, u2 = get_augly_augmentations_list()
-        return u1, u2, corrupt_func_imagecorrupt
+        return u1, u2, corrupt_func_augly
     else:
-        raise ValueError('Invalid library called')
+        raise Exception('Invalid library called')
 
 def get_corrupted_dataloader(testloader, corr_func, severity=1, corr_kwargs=None):
     """
@@ -783,7 +826,21 @@ def best_fit_gradient(x_values, y_values):
     return numerator / denominator
 
 def augmentation_gradient(model, test_loader, device, corr_func, plot_graphs=False, corr_kwargs=None):
-    
+    """
+    Evaluates how the model performance varies against the given augmentation/corruption
+
+    Args:
+        model: model
+        test_loader (torch.dataloader): test data loader
+        device (torch.device): device model is on
+        corr_func (function): corruption function to take in images (np array) / give corrupted dataloader
+        plot_graphs: either False for no graph, or string for which graphing library to use
+        corr_kwargs (dict): corruption arguments
+
+    Returns:
+        best_fit_gradient (float): best fit line gradient of graph of performance vs severity (of augmentation)
+        accuracies (list): list of floats of performance metric 
+    """
     print(f"Evaluating on severity 0...")
     base_acc, _ , _ = evaluate(model, test_loader, device)
     print(f"Accuracy at severity 0: {base_acc:.4f}")
@@ -801,8 +858,8 @@ def augmentation_gradient(model, test_loader, device, corr_func, plot_graphs=Fal
 
     # Plot results
     fig = None
-    if plot_graphs:
-        fig = plot_accuracy_vs_severity(accuracies, severities)  
+    if plot_graphs is not False:
+        fig = plot_accuracy_vs_severity(accuracies, severities, plot_graphs)  
     return best_fit_gradient(severities, accuracies), accuracies, fig
 
 def plot_accuracy_vs_severity(accuracies, severities=None, graph_lib='matplotlib'):
@@ -858,7 +915,6 @@ def plot_accuracy_vs_severity_plotly(accuracies, severities=None):
 
     fig.show()
     return fig
-
 
 def generic_combination_gradients(
     model, 
@@ -920,7 +976,7 @@ def get_partially_corrupted_imagecorr_dataloader(testloader):
     corrupted_dataset = torch.utils.data.TensorDataset(torch.cat(corrupted_images), torch.cat(corrupted_labels))
     return torch.utils.data.DataLoader(corrupted_dataset, batch_size=testloader.batch_size, shuffle=False)
 
-def train_model(model, optimizer, criterion, train_loader, num_epochs=15):
+def train_model(model, optimizer, criterion, train_loader, device, num_epochs=15):
     model.train()
     for epoch in range(num_epochs):
         running_loss = 0.0
@@ -949,10 +1005,10 @@ def retrain_experiment(model, train_loader, test_loader, device, get_corrupted_d
     print("training new models")
     optimizer = optim.Adam(model_copy.parameters(), lr=0.001)
     criterion = nn.CrossEntropyLoss()
-    train_model(model_copy, optimizer, criterion, train_loader_corr, num_epochs=15)
+    train_model(model_copy, optimizer, criterion, train_loader_corr, device, num_epochs=15)
     optimizer = optim.Adam(model_no_weights.parameters(), lr=0.001)
     criterion = nn.CrossEntropyLoss()
-    train_model(model_no_weights, optimizer, criterion, train_loader_corr, num_epochs=15)
+    train_model(model_no_weights, optimizer, criterion, train_loader_corr, device, num_epochs=15)
     
     print("evaluating new models")
     test_loader_corr = get_corrupted_dataloader_func(test_loader)
