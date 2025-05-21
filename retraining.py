@@ -13,6 +13,8 @@ def get_partially_corrupted_dataloader_generic(testloader, corr_func, augmentati
     Args:
         testloader (torch.utils.data.DataLoader): original dataloader
         corr_func (function): corruption function  that takes in ([numpy array of images], severity, corr_kwargs)
+        augmentation_list (list): list of tuples of augmentation function to param dictionary
+        augmentation_str (list): list of augmentation libraries
         severity (int); extent of severity between 0-5.
         corr_kwargs (dict): dictionary of extra parameters to send into corr_func
 
@@ -162,3 +164,28 @@ def retrain_experiment(model, train_loader, test_loader, device, get_corrupted_d
     acc, _, _ = evaluate(model_no_weights, test_loader_corr, device); test_acc_dict['scratch_model']['corrupted'] = acc
     
     return model_copy, model_no_weights, test_acc_dict
+
+if __name__ == "__main__":
+    from cvrob_util import SimpleCNN
+    import torchvision.transforms as transforms
+    import torchvision.datasets as datasets
+
+    device = torch.device("cpu")#"cuda" if torch.cuda.is_available() else "cpu")
+
+    transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
+    train_dataset = datasets.CIFAR10(root="./data", train=True, transform=transform, download=True)
+    test_dataset = datasets.CIFAR10(root="./data", train=False, transform=transform, download=True)
+    clean_test_dataset = datasets.CIFAR10(root="./data", train=False, transform=transform, download=True)
+    clean_test_loader = torch.utils.data.DataLoader(clean_test_dataset, batch_size=128, shuffle=False)
+
+    model = SimpleCNN().to(device)
+    model.load_state_dict(torch.load('label_noise_simplecnn.h5', weights_only=True))
+
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=128, shuffle=True)
+
+    print("Training model on clean train data...")
+    model_copy, model_no_weights, test_acc_dict = retrain_experiment(model, 
+                                                                    train_loader, 
+                                                                    clean_test_loader, 
+                                                                    device,
+                                                                    get_partially_corrupted_dataloader_generic)

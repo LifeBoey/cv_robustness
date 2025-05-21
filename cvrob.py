@@ -47,6 +47,18 @@ from augly.image import blur, brightness, random_noise, contrast, color_jitter, 
 from augly.image import aug_np_wrapper
 
 def corrupt_func_album(images_np, severity, param_dict):
+    """Corrupts all the images provided with the given severity of augmentation
+
+    This is for corrupt function: albumentations. You can apply the same template for the rest.
+
+    Args:
+        images_np (np.array): array of images (also np array) to be augmented
+        severity (int): severity from 1-5
+        param_dict (dict): dictionary of all parameters
+
+    Returns:
+        corrupted_imgs (np.array): array of augmented images
+    """
     aug_func = param_dict['aug_method']
     param_dict2 = {k:v for k,v in param_dict.items() if k != 'aug_method'}
     aug_params = {k: (v(severity) if callable(v) else v) for k, v in param_dict2.items()}
@@ -75,6 +87,24 @@ def corrupt_func_imagecorrupt(images_np, severity, param_dict):
     return corrupted_imgs
 
 def corrupt_and_plot_generic_plotly(img, augmentations, aug_names, corrupt_func, filename=None):
+    """Method for corrupting (read: one!) an image and plotting it using: plotly
+
+    Takes the base image, and severity=1 and severity=2 images.
+
+    Args:
+        img (np.array): np.array representing image
+        augmentations (list): list of tuples of corruption function and 
+        aug_names (_type_): _description_
+        corrupt_func (_type_): corruption (helper) method e.g. corrupt_func_album
+        filename (str, optional): string of filename to save the matrix of augmented images. Defaults to None.
+        graph_lib (str, optional): graphing library used. Defaults to 'matplotlib'.
+
+    Raises:
+        ValueError: invalid graphing library provided. Must be either matplotlib or plotly.
+
+    Returns:
+        fig: (matrix) figure of augmented image.
+    """
     severities = [0, 1, 2]
     rows = len(augmentations)
     cols = len(severities)
@@ -161,6 +191,22 @@ def corrupt_and_plot_generic_mpl(img, augmentations, aug_names, corrupt_func, fi
     return fig
 
 def corrupt_and_plot_generic(img, augmentations, aug_names, corrupt_func, filename=None, graph_lib='matplotlib'):
+    """Header method for corrupting (read: one!) an image and plotting it
+
+    Args:
+        img (np.array): np.array representing image
+        augmentations (list): list of tuples of corruption function and param dictionaries for each function.
+        aug_names (_type_): _description_
+        corrupt_func (_type_): corruption (helper) method e.g. corrupt_func_album
+        filename (str, optional): string of filename to save the matrix of augmented images. Defaults to None.
+        graph_lib (str, optional): graphing library used. Defaults to 'matplotlib'.
+
+    Raises:
+        ValueError: invalid graphing library provided. Must be either matplotlib or plotly.
+
+    Returns:
+        fig: (matrix) figure of augmented image.
+    """
     if graph_lib == 'matplotlib':
         return corrupt_and_plot_generic_mpl(img, augmentations, aug_names, corrupt_func, filename)
     elif graph_lib == 'plotly':
@@ -169,7 +215,6 @@ def corrupt_and_plot_generic(img, augmentations, aug_names, corrupt_func, filena
         raise ValueError('not valid graphing library')
 
 def get_image_from_url(image_url):
-    # Fetch the image
     response = requests.get(image_url)
     image = Image.open(BytesIO(response.content))
     image_array = np.array(image)
@@ -578,6 +623,13 @@ def ensemble_method(noisy_indices_all, strictness=1):
     return final_noisy_indices
 
 def get_all_label_noise_methods():
+    """Get all the label noise prediction methods 
+
+    (will have to be hard coded and edited based on existing methods coded)
+
+    Returns:
+        list: list of Callable methods 
+    """
     return [label_update_indice_method, 
             wrong_prediction_indice_method,
             loss_indice_method,
@@ -594,7 +646,29 @@ def label_noise_method(test_dataset,
                        evaluate=False, 
                        noise_ratio=0.2, 
                        batch_size=128):
-    
+    """Big function to call for label noise predictions
+
+    Runs through list of methods over test_dataset to determine which of the dataset's indices are possibly mislabelled
+
+    Args:
+        test_dataset (torch.utils.data.Dataset): test dataset
+        model (torch.nn): model (for now only works with torch model)
+        device (torch.device): cuda/cpu device
+        list_of_methods (list): list of Callables for noisy label detection
+        param_dict (dict): dictionary of parameters to pass in for list of methods. Union of all possible parameters.
+        evaluate (bool, optional): True only if we know the ground truth + want to evaluate model's mislabel 
+                                   identifying properties. Defaults to False.
+        noise_ratio (float, optional): (ONLY for evaluate=True) Proportion of dataset to make noisy. Defaults to 0.2.
+        batch_size (int, optional): batch size for  testdataloader. Defaults to 128.
+
+    Returns:
+        Tuple: 
+        - noisy_indices_all (list): list of lists, each sublist being of integers of indices where method has
+                                    predicted the label is mislabelled
+        - true_noisy_indices: None if evaluate=False, list of truth value of indices of labels that were changed
+                              if evaluate=True
+        - test_loader (torch.utils.data.DataLoader): test dataloader (including mislabelled data if evaluate=True)
+    """
     true_noisy_indices = None
     print('label noise method: initialization')
     #device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

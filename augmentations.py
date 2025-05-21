@@ -27,6 +27,18 @@ from imagecorruptions import corrupt
 import matplotlib.pyplot as plt
 
 def corrupt_func_album(images_np, severity, param_dict):
+    """Corrupts all the images provided with the given severity of augmentation
+
+    This is for corrupt function: albumentations. You can apply the same template for the rest.
+
+    Args:
+        images_np (np.array): array of images (also np array) to be augmented
+        severity (int): severity from 1-5
+        param_dict (dict): dictionary of all parameters
+
+    Returns:
+        corrupted_imgs (np.array): array of augmented images
+    """
     aug_func = param_dict['aug_method']
     param_dict2 = {k:v for k,v in param_dict.items() if k != 'aug_method'}
     aug_params = {k: (v(severity) if callable(v) else v) for k, v in param_dict2.items()}
@@ -55,6 +67,24 @@ def corrupt_func_imagecorrupt(images_np, severity, param_dict):
     return corrupted_imgs
 
 def corrupt_and_plot_generic_plotly(img, augmentations, aug_names, corrupt_func, filename=None):
+    """Method for corrupting (read: one!) an image and plotting it using: plotly
+
+    Takes the base image, and severity=1 and severity=2 images.
+
+    Args:
+        img (np.array): np.array representing image
+        augmentations (list): list of tuples of corruption function and 
+        aug_names (_type_): _description_
+        corrupt_func (_type_): corruption (helper) method e.g. corrupt_func_album
+        filename (str, optional): string of filename to save the matrix of augmented images. Defaults to None.
+        graph_lib (str, optional): graphing library used. Defaults to 'matplotlib'.
+
+    Raises:
+        ValueError: invalid graphing library provided. Must be either matplotlib or plotly.
+
+    Returns:
+        fig (plotly.Figure): (matrix) figure of augmented image.
+    """
     severities = [0, 1, 2]
     rows = len(augmentations)
     cols = len(severities)
@@ -141,6 +171,22 @@ def corrupt_and_plot_generic_mpl(img, augmentations, aug_names, corrupt_func, fi
     return fig
 
 def corrupt_and_plot_generic(img, augmentations, aug_names, corrupt_func, filename=None, graph_lib='matplotlib'):
+    """Header method for corrupting (read: one!) an image and plotting it
+
+    Args:
+        img (np.array): np.array representing image
+        augmentations (list): list of tuples of corruption function and param dictionaries for each function.
+        aug_names (_type_): _description_
+        corrupt_func (_type_): corruption (helper) method e.g. corrupt_func_album
+        filename (str, optional): string of filename to save the matrix of augmented images. Defaults to None.
+        graph_lib (str, optional): graphing library used. Defaults to 'matplotlib'.
+
+    Raises:
+        ValueError: invalid graphing library provided. Must be either matplotlib or plotly.
+
+    Returns:
+        fig: (matrix) figure of augmented image.
+    """
     if graph_lib == 'matplotlib':
         return corrupt_and_plot_generic_mpl(img, augmentations, aug_names, corrupt_func, filename)
     elif graph_lib == 'plotly':
@@ -209,8 +255,9 @@ def get_nrtk_augmentations_list(seed=42):
         (ContrastPerturber, {'factor': lambda s: 1 + 0.2 * s}),
         (SharpnessPerturber, {'factor': lambda s: 1 - 0.2 * s}),
     ]
-    perturb_names = ["Salt Noise", "Pepper Noise", "Salt Pepper Noise", "Gaussian Noise", "Speckle Noise", \
-                     "Average Blur", "Gaussian Blur", "Median Blur", "Brightness", "Color", "Contrast", "Sharpness"]
+    perturb_names = ["Salt Pepper Noise", "Gaussian Noise", "Gaussian Blur", "Brightness", "Contrast", "Sharpness"]
+    # perturb_names = ["Salt Noise", "Pepper Noise", "Salt Pepper Noise", "Gaussian Noise", "Speckle Noise", \
+    #                  "Average Blur", "Gaussian Blur", "Median Blur", "Brightness", "Color", "Contrast", "Sharpness"]
     return perturbations, perturb_names
 
 def get_augly_augmentations_list():
@@ -317,6 +364,8 @@ def augmentation_gradient(model, test_loader, device, corr_func, plot_graphs=Fal
     """
     Evaluates how the model performance varies against the given augmentation/corruption
 
+    Augments across severity 1-5 (and 0) and outputs the performance change
+
     Args:
         model: model
         test_loader (torch.dataloader): test data loader
@@ -328,6 +377,7 @@ def augmentation_gradient(model, test_loader, device, corr_func, plot_graphs=Fal
     Returns:
         best_fit_gradient (float): best fit line gradient of graph of performance vs severity (of augmentation)
         accuracies (list): list of floats of performance metric 
+        fig (figure): outputs figure of plot_graphs library if not plot_graphs not False, else None
     """
     print(f"Evaluating on severity 0...")
     base_acc, _ , _ = evaluate(model, test_loader, device)
@@ -350,16 +400,32 @@ def augmentation_gradient(model, test_loader, device, corr_func, plot_graphs=Fal
         fig = plot_accuracy_vs_severity(accuracies, severities, plot_graphs)  
     return best_fit_gradient(severities, accuracies), accuracies, fig
 
-
 def augmentation_perf_gradient_method(
     model, 
     test_loader, 
     device, 
-    augmentation_func_wrapper,
+    augmentation_func_wrapper, 
     augmentation_list,
     augmentation_str,
     plot_graphs=False
     ):
+    """Big header method for determining how model behaves with different augmentation severities
+
+    Iterate through the augmentation iterables for each augmentation technique (e.g. blur, contrast, etc for imagecorr)
+
+    Args:
+        model (torch.nn): model (torch model for now)
+        test_loader (torch.utils.data.DataLoader): data loader
+        device (torch.device): cuda/cpu device
+        augmentation_func_wrapper (function): corruption function (e.g. corrupt_func_album)
+        augmentation_list (list): list of tuples for augmentation
+        augmentation_str (str): list of augmentation techniques for given augmentation method
+        plot_graphs (bool, optional): False or the graphing library to plot graph. Defaults to False.
+
+    Returns:
+        Tuple: 
+        - augmentation_dict (dict): dictionary of augmentations <-> 
+    """
 
     assert len(augmentation_list) == len(augmentation_str)
 
@@ -378,3 +444,38 @@ def augmentation_perf_gradient_method(
         
         print()
     return augmentation_dict, augmentation_fig_dict 
+
+
+# =============================================================================================
+
+if __name__ == "__main__":
+    from cvrob_util import SimpleCNN
+    from torchvision import datasets
+    import torchvision.transforms as transforms
+
+    device = torch.device("cpu")#"cuda" if torch.cuda.is_available() else "cpu")
+
+    transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
+    train_dataset = datasets.CIFAR10(root="./data", train=True, transform=transform, download=True)
+    test_dataset = datasets.CIFAR10(root="./data", train=False, transform=transform, download=True)
+    # ===============================================================================================================
+
+    print("noisy indices done! let's go to: robustness evaluation")
+    model = SimpleCNN().to(device)
+    model.load_state_dict(torch.load('label_noise_simplecnn.h5', weights_only=True))
+
+    clean_test_dataset = datasets.CIFAR10(root="./data", train=False, transform=transform, download=True)
+    clean_test_loader = torch.utils.data.DataLoader(clean_test_dataset, batch_size=128, shuffle=False)
+
+    augmentation_list, augmentation_str, corrupt_func = get_corruption_helpers('nrtk')
+    aug_dict_g, aug_dict_f = augmentation_perf_gradient_method(
+        model, 
+        clean_test_loader, 
+        device, 
+        corrupt_func, 
+        augmentation_list,
+        augmentation_str,
+        plot_graphs=False
+    )
+    
+    print(aug_dict_g)

@@ -421,6 +421,11 @@ def ensemble_method(noisy_indices_all, strictness=1):
     return final_noisy_indices
 
 def get_all_label_noise_methods():
+    """
+    Returns all of the label noise methods as defined above. 
+    
+    If you want to have a different order or different types of indice methods, HERE is where you choose it.
+    """
     return [label_update_indice_method, 
             wrong_prediction_indice_method,
             loss_indice_method,
@@ -428,6 +433,45 @@ def get_all_label_noise_methods():
             fine_indice_method,
             cleanlab_indice_method,
             deep_knn_indice_method]
+
+def label_noise_correction(model, device, final_noisy_indices, test_dataset):
+    from torchvision.utils import save_image  
+    import os
+    os.makedirs("noisy_images", exist_ok=True)
+    model.eval()
+    model.to(device)
+    correct_dict = {'filenames': [],
+                    'noisy_labels': [],
+                    'corrected_labels': []}
+    for idx in final_noisy_indices:
+        # Get image and label
+        image, label = test_dataset[idx]
+
+        # Optional: get filename if your dataset supports it
+        if hasattr(test_dataset, "samples"):  # ImageFolder
+            filename = test_dataset.samples[idx][0]
+        elif hasattr(test_dataset, "imgs"):  # Some torchvision versions use this
+            filename = test_dataset.imgs[idx][0]
+        elif hasattr(test_dataset, "get_filename"):  # Custom dataset with a method
+            filename = test_dataset.get_filename(idx)
+        else:
+            filename = f"noisy_images/noisy_image_{idx}.png"
+            # Make sure image is in [0,1] range for save_image
+            save_image(image, filename)
+
+
+        # Run image through model
+        image_tensor = image.unsqueeze(0).to(device)  # Add batch dimension
+        with torch.no_grad():
+            outputs = model(image_tensor)
+            predicted_label = torch.argmax(outputs, dim=1).item()
+
+        print(f"File: {filename} | Original Label: {label} | Predicted Label: {predicted_label}")  
+        correct_dict['filenames'].append(filename)
+        correct_dict['noisy_labels'].append(label)
+        correct_dict['corrected_labels'].append(predicted_label)  
+
+    return correct_dict
 
 def label_noise_method(test_dataset, 
                        model, 
@@ -521,13 +565,7 @@ if __name__ == "__main__":
     model = SimpleCNN().to(device)
     model.load_state_dict(torch.load('label_noise_simplecnn.h5', weights_only=True))
 
-    list_of_methods = [ wrong_prediction_indice_method,
-                        loss_indice_method,
-                        aum_indice_method,
-                        fine_indice_method,
-                        label_update_indice_method,
-                        cleanlab_indice_method,
-                        deep_knn_indice_method]
+    list_of_methods = get_all_label_noise_methods()[:5]
     with open('config.yaml', 'r') as file:
         param_dict = yaml.safe_load(file)
         
@@ -543,4 +581,8 @@ if __name__ == "__main__":
     print('time to ensemble the indices!')
     final_noisy_indices = ensemble_method(noisy_indices_all)
     evaluate_stats = evaluate_noisy_indices(final_noisy_indices, true_noisy_indices)
+    correct_dict = label_noise_correction(model, device, final_noisy_indices, test_dataset)
     print("evaluating noisy indices:", evaluate_stats)
+    print()
+    print("corrected dictionary")
+    print(correct_dict)
