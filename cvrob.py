@@ -275,30 +275,42 @@ def evaluate(model, loader, device):
 
 def evaluate_noisy_indices(detected_indices, true_indices):
     """
-    Evaluate performance of label noise method based on output and ground truth 
+    Evaluate the performance of a noisy label detection method.
+
+    This function compares the set of detected noisy label indices with the ground truth indices
+    of actual noisy labels, and computes three evaluation metrics:
+    
+    - Precision: Proportion of detected noisy labels that are actually noisy.
+    - Recall: Proportion of true noisy labels that were successfully detected.
+    - Jaccard Index (called 'accuracy' here): Overlap between detected and true noisy labels.
 
     Args:
-        detected_indices (list): list of predicted indices for wrong labels 
-        true_indices (list): list of actual indices where labels were changed to be wrong
+        detected_indices (list or set): Indices predicted to have noisy (incorrect) labels.
+        true_indices (list or set): Ground truth indices of actual noisy labels.
 
-    Results:
+    Returns:
         tuple:
-            precision (float)
-            recall (float)
-            accuracy (float)
+            precision (float): Correct detections / total detected.
+            recall (float): Correct detections / total actual noisy labels.
+            jaccard_index (float): Intersection over union of detected and true noisy sets.
     """
     detected_noisy_set = set(detected_indices)
-    true_noisy = set(true_indices)
+    true_noisy_set = set(true_indices)
 
-    correct_detections = len(detected_noisy_set.intersection(true_noisy))
-    precision = correct_detections / len(detected_noisy_set) if len(detected_noisy_set) > 0 else 0
-    recall = correct_detections / len(true_noisy) if len(true_noisy) > 0 else 0
-    accuracy = correct_detections / len(true_noisy.union(detected_noisy_set))
+    correct_detections = len(detected_noisy_set.intersection(true_noisy_set))
+    precision = correct_detections / len(detected_noisy_set) if detected_noisy_set else 0.0
+    recall = correct_detections / len(true_noisy_set) if true_noisy_set else 0.0
+    jaccard_index = correct_detections / len(detected_noisy_set.union(true_noisy_set)) if (detected_noisy_set or true_noisy_set) else 0.0
+
+    print(f"Precision: {precision:.4f}, Recall: {recall:.4f}, Accuracy: {jaccard_index:.4f}")
 
 
-    print(f"Precision: {precision:.4f}, Recall: {recall:.4f}, Accuracy: {accuracy:.4f}")
+    correct_detections = len(detected_noisy_set.intersection(true_noisy_set))
+    precision = correct_detections / len(detected_noisy_set) if detected_noisy_set else 0.0
+    recall = correct_detections / len(true_noisy_set) if true_noisy_set else 0.0
+    jaccard_index = correct_detections / len(detected_noisy_set.union(true_noisy_set)) if (detected_noisy_set or true_noisy_set) else 0.0
 
-    return precision, recall, accuracy
+    return precision, recall, jaccard_index
 
 def wrong_prediction_indice_method(test_loader, model, device):
     """
@@ -310,6 +322,9 @@ def wrong_prediction_indice_method(test_loader, model, device):
         test_loader (torch.Dataloader): data loader for test data
         model (torch.nn.Module): torch model
         device (torch.device): device model is on
+
+    Returns:
+        np.array: List of predicted noisy labels
     """
     _, predicted_labels, truth_labels = evaluate(model, test_loader, device)
     mismatched_indices = np.where(predicted_labels != truth_labels)[0]
@@ -382,6 +397,9 @@ def aum_indice_method(test_loader, model, device):
         test_loader (torch.Dataloader): data loader for test data
         model (torch.nn.Module): torch model
         device (torch.device): device model is on
+
+    Returns:
+        list: list of indices determined to be noisy
     """
     save_dir = '.'
     aum_calculator = AUMCalculator(save_dir, compressed=True)
@@ -412,7 +430,7 @@ def get_logits(model, dataloader, device):
         device (torch.device): device model is on
 
     Returns: 
-        logits (np.array): array of outputs just before they pass through the softmax/max/last layer for prediction
+        np.array: array of outputs just before they pass through the softmax/max/last layer for prediction
     """
     labels = np.empty((0,))
 

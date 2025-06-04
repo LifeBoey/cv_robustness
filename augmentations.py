@@ -2,7 +2,11 @@ import torch
 import numpy as np
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
-from nrtk.impls.perturb_image.generic.cv2.blur import AverageBlurPerturber, GaussianBlurPerturber, MedianBlurPerturber
+from nrtk.impls.perturb_image.generic.cv2.blur import (
+    AverageBlurPerturber, 
+    GaussianBlurPerturber, 
+    MedianBlurPerturber
+)
 from nrtk.impls.perturb_image.generic.PIL.enhance import (
     BrightnessPerturber,
     ColorPerturber,
@@ -73,9 +77,9 @@ def corrupt_and_plot_generic_plotly(img, augmentations, aug_names, corrupt_func,
 
     Args:
         img (np.array): np.array representing image
-        augmentations (list): list of tuples of corruption function and 
-        aug_names (_type_): _description_
-        corrupt_func (_type_): corruption (helper) method e.g. corrupt_func_album
+        augmentations (list): list of two-length tuples 
+        aug_names (list): list of names of the given libraries
+        corrupt_func (function): custom corrupt function: takes in images np array, severity, and augmentation parameters and returns corrupted images np array
         filename (str, optional): string of filename to save the matrix of augmented images. Defaults to None.
         graph_lib (str, optional): graphing library used. Defaults to 'matplotlib'.
 
@@ -175,9 +179,9 @@ def corrupt_and_plot_generic(img, augmentations, aug_names, corrupt_func, filena
 
     Args:
         img (np.array): np.array representing image
-        augmentations (list): list of tuples of corruption function and param dictionaries for each function.
-        aug_names (_type_): _description_
-        corrupt_func (_type_): corruption (helper) method e.g. corrupt_func_album
+        augmentations (list): list of two-length tuples 
+        aug_names (list): list of names of the given libraries
+        corrupt_func (function): custom corrupt function: takes in images np array, severity, and augmentation parameters and returns corrupted images np array
         filename (str, optional): string of filename to save the matrix of augmented images. Defaults to None.
         graph_lib (str, optional): graphing library used. Defaults to 'matplotlib'.
 
@@ -197,6 +201,9 @@ def corrupt_and_plot_generic(img, augmentations, aug_names, corrupt_func, filena
 def get_album_augmentations_list():
     """
     Get the augmentation list and string for albumentations.
+
+    Args:
+        None.
 
     Returns:
         augmentation_list (list): list of two-length tuples 
@@ -264,6 +271,9 @@ def get_augly_augmentations_list():
     """
     Get the augmentation list and string for augly.
 
+    Args:
+        None.
+
     Returns:
         augmentation_list (list): list of two-length tuples 
         augmentation_str (list): list of names of the given libraries
@@ -281,6 +291,9 @@ def get_imagecorrupt_augmentations_list():
     """
     Get the augmentation list and string for imagecorrupt.
 
+    Args:
+        None.
+        
     Returns:
         augmentation_list (list): list of two-length tuples 
         augmentation_str (list): list of names of the given libraries
@@ -309,9 +322,10 @@ def get_corruption_helpers(library='albumentations'):
         library (str): corruption library name
     
     Returns:
-        augmentation_list (list): list of two-length tuples 
-        augmentation_str (list): list of names of the given libraries
-        corrupt_func (function): custom corrupt function: takes in images np array, severity, and augmentation parameters and returns corrupted images np array
+        Tuple:
+            augmentation_list (list): list of two-length tuples 
+            augmentation_str (list): list of names of the given libraries
+            corrupt_func (function): custom corrupt function: takes in images np array, severity, and augmentation parameters and returns corrupted images np array
     """
     if library in ['albumentations', 'album']:
         a1, a2 = get_album_augmentations_list()
@@ -339,7 +353,7 @@ def get_corrupted_dataloader(testloader, corr_func, severity=1, corr_kwargs=None
         corr_kwargs (dict): dictionary of extra parameters to send into corr_func
 
     Returns:
-        corrupted_dataloader (torch.Dataloader): corrupted version of original dataloader
+        torch.utils.data.DataLoader: corrupted version of original dataloader
     """
     if corr_kwargs is None:
         corr_kwargs = {}  # Default to an empty dictionary
@@ -375,9 +389,10 @@ def augmentation_gradient(model, test_loader, device, corr_func, plot_graphs=Fal
         corr_kwargs (dict): corruption arguments
 
     Returns:
-        best_fit_gradient (float): best fit line gradient of graph of performance vs severity (of augmentation)
-        accuracies (list): list of floats of performance metric 
-        fig (figure): outputs figure of plot_graphs library if not plot_graphs not False, else None
+        Tuple:
+            best_fit_gradient (float): best fit line gradient of graph of performance vs severity (of augmentation)
+            accuracies (list): list of floats of performance metric 
+            fig (figure): outputs figure of plot_graphs library if not plot_graphs not False, else None
     """
     print(f"Evaluating on severity 0...")
     base_acc, _ , _ = evaluate(model, test_loader, device)
@@ -408,7 +423,7 @@ def augmentation_perf_gradient_method(
     augmentation_list,
     augmentation_str,
     plot_graphs=False
-    ):
+):
     """Big header method for determining how model behaves with different augmentation severities
 
     Iterate through the augmentation iterables for each augmentation technique (e.g. blur, contrast, etc for imagecorr)
@@ -424,7 +439,8 @@ def augmentation_perf_gradient_method(
 
     Returns:
         Tuple: 
-        - augmentation_dict (dict): dictionary of augmentations <-> 
+        - augmentation_dict (dict): dictionary of augmentations <-> techniques with respective gradient and first drop scores
+        - augmentation_fig_dict (dict): dictionary of augmentations <-> techniques with figures of the performance vs aug severity 1-5
     """
 
     assert len(augmentation_list) == len(augmentation_str)

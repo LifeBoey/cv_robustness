@@ -98,18 +98,19 @@ def get_logits(model, dataloader, device):
     labels = np.empty((0,))
 
     model.eval()  # Ensure the model is in evaluation mode
-    with tqdm(dataloader) as progress:
-        for batch_idx, (data, label) in enumerate(progress):
-            data, label = data, label.long()  # No need to move to GPU, stay on CPU
-            data = data.to(device)
-            label = label.to(device)
-            feature = model(data)  # Forward pass
+    with torch.no_grad():
+        with tqdm(dataloader) as progress:
+            for batch_idx, (data, label) in enumerate(progress):
+                data, label = data, label.long()  # No need to move to GPU, stay on CPU
+                data = data.to(device)
+                label = label.to(device)
+                feature = model(data)  # Forward pass
 
-            labels = np.concatenate((labels, label.cpu()))  # Ensure labels are on CPU
-            if batch_idx == 0:
-                features = feature.detach().cpu()  # Ensure features are on CPU
-            else:
-                features = np.concatenate((features, feature.detach().cpu()), axis=0)
+                labels = np.concatenate((labels, label.cpu()))  # Ensure labels are on CPU
+                if batch_idx == 0:
+                    features = feature.detach().cpu()  # Ensure features are on CPU
+                else:
+                    features = np.concatenate((features, feature.detach().cpu()), axis=0)
     
     return features, labels
 

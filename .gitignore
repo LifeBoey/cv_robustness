@@ -4,3 +4,4 @@ data/
 classifier/
 dataset_20200803/
 noisy_images/
+__pycache__/

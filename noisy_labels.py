@@ -1,97 +1,63 @@
 #Import libraries and data and model
 import torch
 import yaml
-import torch.nn as nn
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
+from torchvision.utils import save_image 
 import random
 import torch.nn.functional as F
 import numpy as np
 from aum import AUMCalculator, DatasetWithIndex
 import pandas as pd
 from FINE_official.dynamic_selection.selection.svd_classifier import get_score, get_singular_vector, get_mean_vector
-from tqdm import tqdm
 from cleanlab.filter import find_label_issues
 from scipy.special import softmax
 from sklearn.neighbors import NearestNeighbors
-from collections import Counter
+from collections import Counter, defaultdict
 import inspect
+from scipy.stats import skew
+import os
+from cvrob_util import get_logits, evaluate
 
 # =============================================================================================
 
-class SimpleCNN(nn.Module):
-    def __init__(self):
-        super(SimpleCNN, self).__init__()
-        self.conv1 = nn.Conv2d(3, 32, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
-        self.fc1 = nn.Linear(64*8*8, 128)
-        self.fc2 = nn.Linear(128, 10)
-        self.pool = nn.MaxPool2d(2, 2)
-        self.relu = nn.ReLU()
-
-    def forward(self, x):
-        x = self.pool(self.relu(self.conv1(x)))
-        x = self.pool(self.relu(self.conv2(x)))
-        x = x.view(x.size(0), -1)
-        x = self.relu(self.fc1(x))
-        x = self.fc2(x)
-        return x
-
-def evaluate(model, loader, device):
-    """
-    Evaluate model using data from loader
-
-    Args:
-        model (torch.nn.Module): torch model
-        loader (torch.utils.data.DataLoader): data loader
-        device (torch.device): device model is on
-
-    Returns: 
-        tuple:
-            accuracy (float): percentage of correctly predicted labels
-            predicted_labels (np.array): predictions output by label
-            true_labels (np.array): ground truth labels
-    """
-    model.eval()
-    correct, total = 0, 0
-    predicted_labels, true_labels = [], []
-    with torch.no_grad():
-        for inputs, targets in loader:
-            inputs, targets = inputs.to(device), targets.to(device)
-            outputs = model(inputs)
-            _, predicted = torch.max(outputs, 1)
-            correct += (predicted == targets).sum().item()
-            total += targets.size(0)
-            predicted_labels.extend(predicted.cpu().numpy())
-            true_labels.extend(targets.cpu().numpy())
-    return 100 * correct / total, np.array(predicted_labels), np.array(true_labels)
-
 def evaluate_noisy_indices(detected_indices, true_indices):
     """
-    Evaluate performance of label noise method based on output and ground truth 
+    Evaluate the performance of a noisy label detection method.
+
+    This function compares the set of detected noisy label indices with the ground truth indices
+    of actual noisy labels, and computes three evaluation metrics:
+    
+    - Precision: Proportion of detected noisy labels that are actually noisy.
+    - Recall: Proportion of true noisy labels that were successfully detected.
+    - Jaccard Index (called 'accuracy' here): Overlap between detected and true noisy labels.
 
     Args:
-        detected_indices (list): list of predicted indices for wrong labels 
-        true_indices (list): list of actual indices where labels were changed to be wrong
+        detected_indices (list or set): Indices predicted to have noisy (incorrect) labels.
+        true_indices (list or set): Ground truth indices of actual noisy labels.
 
-    Results:
+    Returns:
         tuple:
-            precision (float)
-            recall (float)
-            accuracy (float)
+            precision (float): Correct detections / total detected.
+            recall (float): Correct detections / total actual noisy labels.
+            jaccard_index (float): Intersection over union of detected and true noisy sets.
     """
     detected_noisy_set = set(detected_indices)
-    true_noisy = set(true_indices)
+    true_noisy_set = set(true_indices)
 
-    correct_detections = len(detected_noisy_set.intersection(true_noisy))
-    precision = correct_detections / len(detected_noisy_set) if len(detected_noisy_set) > 0 else 0
-    recall = correct_detections / len(true_noisy) if len(true_noisy) > 0 else 0
-    accuracy = correct_detections / len(true_noisy.union(detected_noisy_set))
+    correct_detections = len(detected_noisy_set.intersection(true_noisy_set))
+    precision = correct_detections / len(detected_noisy_set) if detected_noisy_set else 0.0
+    recall = correct_detections / len(true_noisy_set) if true_noisy_set else 0.0
+    jaccard_index = correct_detections / len(detected_noisy_set.union(true_noisy_set)) if (detected_noisy_set or true_noisy_set) else 0.0
 
+    print(f"Precision: {precision:.4f}, Recall: {recall:.4f}, Accuracy: {jaccard_index:.4f}")
 
-    print(f"Precision: {precision:.4f}, Recall: {recall:.4f}, Accuracy: {accuracy:.4f}")
+    correct_detections = len(detected_noisy_set.intersection(true_noisy_set))
+    precision = correct_detections / len(detected_noisy_set) if detected_noisy_set else 0.0
+    recall = correct_detections / len(true_noisy_set) if true_noisy_set else 0.0
+    jaccard_index = correct_detections / len(detected_noisy_set.union(true_noisy_set)) if (detected_noisy_set or true_noisy_set) else 0.0
 
-    return precision, recall, accuracy
+    return precision, recall, jaccard_index
 
 def wrong_prediction_indice_method(test_loader, model, device):
     """
@@ -103,6 +69,9 @@ def wrong_prediction_indice_method(test_loader, model, device):
         test_loader (torch.utils.data.DataLoader): data loader for test data
         model (torch.nn.Module): torch model
         device (torch.device): device model is on
+
+    Returns:
+        np.array: List of predicted noisy labels
     """
     _, predicted_labels, truth_labels = evaluate(model, test_loader, device)
     mismatched_indices = np.where(predicted_labels != truth_labels)[0]
@@ -149,6 +118,11 @@ def loss_indice_method(test_loader, model, device, thres=20, num_epochs=10):
         device (torch.device): device model is on
         num_epochs (int): number of epochs to track loss on
         thres (float): percent of indices that you guess are noisy
+
+    Returns:
+        Tuple:
+            np.array: List of predicted noisy labels
+            np.array: List of (normalized) weighted scores for confidence of predictions of noisy labels
     """
     loss_per_sample_over_epochs = track_loss_per_sample_multiple_epochs(model, 
                                                                         test_loader, 
@@ -161,7 +135,9 @@ def loss_indice_method(test_loader, model, device, thres=20, num_epochs=10):
     sample_losses.sort(key=lambda x: x[1], reverse=True)  # Sort by highest loss
     num_noisy = int(len(sample_losses) * (thres/100))
     lossy_noisy_indices = [idx for idx, _ in sample_losses[:num_noisy]]
-    return lossy_noisy_indices
+    scores = [x[1] for x in sample_losses]
+    norm_scores = auto_normalize_weights(scores)[:num_noisy]
+    return lossy_noisy_indices, norm_scores
 
 def aum_indice_method(test_loader, model, device, thres=20):
     """
@@ -174,6 +150,11 @@ def aum_indice_method(test_loader, model, device, thres=20):
         test_loader (torch.utils.data.DataLoader): data loader for test data
         model (torch.nn.Module): torch model
         device (torch.device): device model is on
+
+    Returns:
+        tuple:
+            noisy_labels (np.array): array of indices identified to be noisy
+            noisy_scores (np.array): array of weights / scores assigned to labels for confidence in noisy prediction
     """
     save_dir = '.'
     aum_calculator = AUMCalculator(save_dir, compressed=True)
@@ -193,39 +174,11 @@ def aum_indice_method(test_loader, model, device, thres=20):
 
     aum_calculator.finalize()
     aum_values = pd.read_csv('aum_values.csv')
-    aum_idx = [int(x.replace('tensor(', '').replace(')', '')) for x in aum_values[-threshold:]['sample_id']]
-    return aum_idx
-
-def get_logits(model, dataloader, device):
-    """
-    Get the features, or the inputs before the last layer
-
-    Args:
-        test_loader (torch.utils.data.DataLoader): data loader for test data
-        model (torch.nn.Module): torch model
-        device (torch.device): device model is on
-
-    Returns: 
-        logits (np.array): array of outputs just before they pass through the softmax/max/last layer for prediction
-    """
-    labels = np.empty((0,))
-
-    model.eval()  # Ensure the model is in evaluation mode
-    with torch.no_grad():
-        with tqdm(dataloader) as progress:
-            for batch_idx, (data, label) in enumerate(progress):
-                data, label = data, label.long()  # No need to move to GPU, stay on CPU
-                data = data.to(device)
-                label = label.to(device)
-                feature = model(data)  # Forward pass
-
-                labels = np.concatenate((labels, label.cpu()))  # Ensure labels are on CPU
-                if batch_idx == 0:
-                    features = feature.detach().cpu()  # Ensure features are on CPU
-                else:
-                    features = np.concatenate((features, feature.detach().cpu()), axis=0)
-    
-    return features, labels
+    aum_idx = np.array([int(x.replace('tensor(', '').replace(')', '')) for x in aum_values[-threshold:]['sample_id']]) 
+    normalized_scores = auto_normalize_weights(np.array(aum_values[:]['aum']))
+    aum_scores = normalized_scores[-threshold:]
+    # aum_scores = np.array(aum_values[-threshold:]['aum'])
+    return aum_idx, aum_scores
 
 def fine_indice_method(test_loader, model, device, norm=True, eigen=True, thres=20):
     """
@@ -238,6 +191,11 @@ def fine_indice_method(test_loader, model, device, norm=True, eigen=True, thres=
         test_loader (torch.utils.data.DataLoader): data loader for test data
         model (torch.nn.Module): torch model
         device (torch.device): device model is on
+
+    Returns:
+        tuple:
+            noisy_labels (np.array): array of indices identified to be noisy
+            noisy_scores (np.array): array of weights / scores assigned to labels for confidence in noisy prediction
     """
     features, labels = get_logits(model, test_loader, device)  # Extract feature representations
 
@@ -257,7 +215,9 @@ def fine_indice_method(test_loader, model, device, norm=True, eigen=True, thres=
     # Mark labels above threshold as clean
     clean_labels = np.where(scores > threshold)[0]
     noisy_labels = np.setdiff1d(np.arange(len(scores)), clean_labels)
-    return noisy_labels
+    normalized_scores = auto_normalize_weights(scores)
+    noisy_scores = normalized_scores[noisy_labels]
+    return noisy_labels, noisy_scores
 
 class LabelUpdate:
 
@@ -334,6 +294,9 @@ def label_update_indice_method(test_loader, model, device='cpu', num_epochs=50):
         model (torch.nn.Module): torch model
         device (torch.device): device model is on
         num_epochs (int): number of epochs to track loss on
+
+    Returns:
+        np.array: List of predicted noisy labels
     """
     label_updater = LabelUpdate(dataloader=test_loader, model=model, device=device, args=num_epochs)
     for epoch in range(num_epochs):
@@ -350,6 +313,11 @@ def cleanlab_indice_method(test_loader, model, device='cpu'):
         test_loader (torch.utils.data.DataLoader): data loader for test data
         model (torch.nn.Module): torch model
         device (torch.device): device model is on
+
+    Returns:
+        Tuple:
+            np.array: List of predicted noisy labels
+            np.array: List of (normalized) weighted scores for confidence of predictions of noisy labels
     """
     features, labels = get_logits(model, test_loader, device)
     labels = [int(l) for l in labels]
@@ -359,7 +327,11 @@ def cleanlab_indice_method(test_loader, model, device='cpu'):
         pred_probs,
         return_indices_ranked_by="self_confidence",
     )
-    return list(ranked_label_issues[:len(ranked_label_issues)//2])
+    noisy_indices = list(ranked_label_issues[:len(ranked_label_issues)//2])
+    weights = [len(labels) - x for x in range(len(labels))]
+    weights = auto_normalize_weights(weights)[:len(noisy_indices)]
+    #weights = [len(noisy_indices) - x for x in range(len(noisy_indices))]
+    return noisy_indices, weights
 
 def deep_knn_indice_method(test_loader, model, device='cpu', k=500, thres=20):
 
@@ -396,10 +368,12 @@ def deep_knn_indice_method(test_loader, model, device='cpu', k=500, thres=20):
 
     # Step 5: Select noisy indices
     noisy_indices = indices[agreement_scores <= threshold]
+    normalized_scores = auto_normalize_weights(agreement_scores)
+    agreement_scores2 = normalized_scores[agreement_scores <= threshold]
 
-    return noisy_indices
+    return noisy_indices, agreement_scores2
 
-def ensemble_method(noisy_indices_all, strictness=1):
+def ensemble_method_voting(noisy_indices_all, strictness=1):
     """
     Ensemble method for how to determine the final indices given the conglomerate of indices
 
@@ -416,9 +390,67 @@ def ensemble_method(noisy_indices_all, strictness=1):
 
     threshold = len(noisy_sets)//2  + strictness
     final_noisy_indices = {idx for idx, count in count_dict.items() if count >= threshold}
+    return final_noisy_indices
+
+def ensemble_method_weighted(noisy_indices_all, weight_scores, strictness):
+    """
+    Ensemble method for how to determine the final indices given the conglomerate of indices
+
+    (weighted voting, assumes all the weights are normalized)
+
+    Args:
+        noisy_indices_all (list): list of lists, each sublist has indices from a method's guess of the noisy labels
+        weight_scores (list of floats, optional): Confidence or performance score for each method.
+        strictness (float): how strict you want to be in ensembling; value from 0-1, higher = stricter/smaller result
+
+    Returns:
+        set: Final predicted noisy indices after ensembling.
+    """
+    vote_scores = defaultdict(float)
+
+    # Accumulate scores per index
+    for method_indices, method_weights in zip(noisy_indices_all, weight_scores):
+        if len(method_indices) != len(method_weights):
+            raise ValueError("Each method's indices and weights must have the same length")
+        for idx, score in zip(method_indices, method_weights):
+            vote_scores[idx] += float(score)
+
+    max_score = max(float(v) for v in vote_scores.values()) if vote_scores else 0
+    threshold = max_score * strictness
+
+    final_noisy_indices = {idx for idx, score in vote_scores.items() if score >= threshold}
+    return final_noisy_indices
+
+def ensemble_method_general(noisy_indices_all, weight_scores=None, strictness=1, weight_ensemble=False):
+    """
+    Ensemble method to determine final noisy label indices from multiple methods.
+
+    Supports simple majority voting or weighted voting using method confidence scores.
+
+    Args:
+        noisy_indices_all (list of lists): Each sublist contains predicted noisy indices from one method.
+        weight_scores (list of floats, optional): Confidence or performance score for each method.
+        strictness (int or float): Degree of strictness or tuning of threshold
+        weight_ensemble (bool): Whether to use weights for voting instead of majority.
+
+    Returns:
+        set: Final predicted noisy indices after ensembling.
+    """
+    num_methods = len(noisy_indices_all)
+
+    if weight_ensemble:
+        if weight_scores is None:
+            raise ValueError("weight_scores must be provided when weight_ensemble=True")
+        if len(weight_scores) != num_methods:
+            raise ValueError("Length of weight_scores must match number of methods")
+
+        final_noisy_indices = ensemble_method_weighted(noisy_indices_all, weight_scores, strictness)
+
+    else:
+        final_noisy_indices = ensemble_method_voting(noisy_indices_all, strictness)
 
     print(f"Final Noisy Indices ({len(final_noisy_indices)} samples)")
-    return final_noisy_indices
+    return sorted(final_noisy_indices)
 
 def get_all_label_noise_methods():
     """
@@ -435,8 +467,31 @@ def get_all_label_noise_methods():
             deep_knn_indice_method]
 
 def label_noise_correction(model, device, final_noisy_indices, test_dataset):
-    from torchvision.utils import save_image  
-    import os
+    """
+    Corrects noisy labels by using the model's predictions for suspected noisy samples.
+
+    This function processes the suspected noisy samples (identified by `final_noisy_indices`),
+    passes each through the model to get a corrected label prediction, and optionally saves
+    the image to disk for inspection. It returns a dictionary containing filenames, original
+    (noisy) labels, and corrected labels.
+
+    Args:
+        model (torch.nn.Module): Trained PyTorch classification model.
+        device (str or torch.device): The device on which computation should be performed (e.g., "cpu" or "cuda").
+        final_noisy_indices (list of int): Indices of samples in the dataset suspected to have noisy labels.
+        test_dataset (torch.utils.data.Dataset): The dataset containing samples and (possibly incorrect) labels.
+
+    Returns:
+        dict: A dictionary with keys:
+            - 'filenames' (list of str): Filenames or generated identifiers for the noisy samples.
+            - 'noisy_labels' (list of int): Original (potentially incorrect) labels from the dataset.
+            - 'corrected_labels' (list of int): Labels predicted by the model for the corresponding samples.
+
+    Notes:
+        - If the dataset supports filename access via `.samples`, `.imgs`, or a custom `.get_filename(idx)` method,
+          the filenames are retrieved. Otherwise, images are saved into a `noisy_images/` folder.
+        - Requires torchvision's `save_image` if image saving is needed for fallback identifiers.
+    """
     os.makedirs("noisy_images", exist_ok=True)
     model.eval()
     model.to(device)
@@ -533,7 +588,7 @@ def label_noise_method(test_dataset,
     param_dict['model'] = model
     param_dict['device'] = device
 
-    noisy_indices_all = []
+    noisy_indices_all = []; weight_scores_all = []
     for method in list_of_methods:
         print('method:', method)
         sig = inspect.signature(method)
@@ -543,19 +598,65 @@ def label_noise_method(test_dataset,
             if name in param_dict
         }
         noisy_indices = method(**accepted_params)
+        if type(noisy_indices) == tuple and len(noisy_indices) == 2:
+            noisy_indices, weight_scores = noisy_indices
+        else:
+            weight_scores =  np.ones(len(noisy_indices))
         # noisy_indices = method(test_loader, model, device)
         if evaluate:
             evaluate_noisy_indices(noisy_indices, true_noisy_indices)
             print('and that was for method:', method)
         noisy_indices_all.append(noisy_indices)
+        weight_scores_all.append(weight_scores)
         print()
     
-    return noisy_indices_all, true_noisy_indices, test_loader                                                                                                                                                                                                                                                                                              
+    return noisy_indices_all, weight_scores_all, true_noisy_indices, test_loader                                                                                                                                                                                                                                                                                              
+
+def auto_normalize_weights(scores):
+    """
+    Automatically normalize a list/array of weight scores to [0,1] based on heuristics
+    about their distribution and value range.
+
+    Args:
+        scores (list / np.array): list of weighted scores (unnormalized)
+
+    Returns:
+        np.array: normalized weights
+    """
+    scores = np.array(scores, dtype=np.float64)
+    
+    # Basic stats
+    s_min = np.min(scores)
+    s_max = np.max(scores)
+    s_mean = np.mean(scores)
+    s_std = np.std(scores)
+    s_skew = skew(scores)
+
+    # Heuristic rules:
+    # 1. If negative values present, assume log scores -> exponentiate then min-max normalize
+    if s_min < 0:
+        scores = np.exp(scores - s_min)  # shift to avoid too small exps if very negative
+        scores = (scores - np.min(scores)) / (np.ptp(scores) + 1e-8)
+        return scores
+
+    # 2. If values mostly between 0 and 1, assume already probabilities or bounded scores
+    if s_min >= 0 and s_max <= 1.05:
+        # Just clip to [0,1]
+        return np.clip(scores, 0, 1)
+
+    # 3. If large range or large mean or high skew, assume arbitrary raw scores -> min-max normalize
+    if (s_max - s_min) > 1 or s_mean > 1 or abs(s_skew) > 1:
+        scores = (scores - s_min) / (s_max - s_min + 1e-8)
+        return scores
+
+    # 4. Default fallback: min-max normalize (covers most cases)
+    scores = (scores - s_min) / (s_max - s_min + 1e-8)
+    return scores
 
 # =============================================================================================
 
 if __name__ == "__main__":
-
+    from cvrob_util import SimpleCNN
     device = torch.device("cpu")#"cuda" if torch.cuda.is_available() else "cpu")
 
     transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
@@ -569,20 +670,23 @@ if __name__ == "__main__":
     with open('config.yaml', 'r') as file:
         param_dict = yaml.safe_load(file)
         
-    noisy_indices_all, true_noisy_indices, test_loader = label_noise_method(test_dataset, 
-                                                                            model, 
-                                                                            device,
-                                                                            list_of_methods, 
-                                                                            param_dict,
-                                                                            evaluate=True, 
-                                                                            noise_ratio=0.2, 
-                                                                            batch_size=128)
+    noisy_indices_all, weight_scores, true_noisy_indices, test_loader = label_noise_method(test_dataset, \
+                                                                                            model, \
+                                                                                            device,\
+                                                                                            list_of_methods, \
+                                                                                            param_dict,\
+                                                                                            evaluate=True, \
+                                                                                            noise_ratio=0.2, \
+                                                                                            batch_size=128)
 
     print('time to ensemble the indices!')
-    final_noisy_indices = ensemble_method(noisy_indices_all)
+    final_noisy_indices = ensemble_method_general(noisy_indices_all, weight_scores)
     evaluate_stats = evaluate_noisy_indices(final_noisy_indices, true_noisy_indices)
     correct_dict = label_noise_correction(model, device, final_noisy_indices, test_dataset)
     print("evaluating noisy indices:", evaluate_stats)
     print()
-    print("corrected dictionary")
-    print(correct_dict)
+    for l in weight_scores:
+        print(l)
+        print()
+    # print("corrected dictionary")
+    # print(correct_dict)
